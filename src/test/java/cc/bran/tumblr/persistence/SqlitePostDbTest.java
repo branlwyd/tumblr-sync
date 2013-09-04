@@ -11,8 +11,8 @@ import junit.framework.TestSuite;
 import org.joda.time.Duration;
 import org.joda.time.Instant;
 
-import cc.bran.tumblr.persistence.SqlitePostDb;
 import cc.bran.tumblr.types.Post;
+import cc.bran.tumblr.types.PostType;
 
 import com.google.common.collect.ImmutableSet;
 
@@ -25,18 +25,18 @@ public class SqlitePostDbTest extends TestCase {
 
   private static final Post FIRST_POST = new Post(513, "foo.tumblr.com",
           "http://foo.tumblr.com/posts/513/whee", Instant.now().minus(Duration.millis(5000)),
-          Instant.now(), ImmutableSet.of("tag1", "tag2", "tag3"), "test post",
+          Instant.now(), ImmutableSet.of("tag1", "tag2", "tag3"), PostType.TEXT, "test post",
           "hello world, this is a test post");
 
   private static final Post FIRST_POST_EDITED = new Post(513, "foo.tumblr.com",
           "http://foo.tumblr.com/posts/513/whee", Instant.now().minus(Duration.millis(6000)),
           Instant.now().minus(Duration.millis(2100)), ImmutableSet.of("tag2", "tag4"),
-          "edited test post", "the old content was bad");
+          PostType.TEXT, "edited test post", "the old content was bad");
 
   private static final Post SECOND_POST = new Post(655, "bar.tumblr.com",
           "http://bar.tumblr.com/posts/655/xyzzy", Instant.now().minus(Duration.millis(2332)),
           Instant.now().minus(Duration.millis(122)), ImmutableSet.of("tag2", "tag3", "tag4"),
-          "second post", "here is another test post");
+          PostType.TEXT, "second post", "here is another test post");
 
   static {
     try {

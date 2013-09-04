@@ -8,8 +8,10 @@ import org.joda.time.Instant;
 
 import sun.reflect.generics.reflectiveObjects.NotImplementedException;
 import cc.bran.tumblr.types.Post;
+import cc.bran.tumblr.types.PostType;
 
 import com.google.common.base.Preconditions;
+import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableMap;
 import com.tumblr.jumblr.JumblrClient;
 import com.tumblr.jumblr.types.TextPost;
@@ -105,6 +107,7 @@ public class JumblrTumblrApi implements TumblrApi {
     Instant postedInstant = new Instant(MILLIS_PER_SECOND * textPost.getTimestamp());
 
     return new Post(textPost.getId(), textPost.getBlogName(), textPost.getPostUrl(), postedInstant,
-            retrievedInstant, textPost.getTags(), textPost.getTitle(), textPost.getBody());
+            retrievedInstant, textPost.getTags(), PostType.valueOf(textPost.getType().toUpperCase()),
+            Strings.nullToEmpty(textPost.getTitle()), textPost.getBody());
   }
 }

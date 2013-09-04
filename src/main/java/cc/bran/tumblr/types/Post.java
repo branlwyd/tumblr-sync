@@ -32,13 +32,17 @@ public class Post {
 
   private final String title;
 
+  private final PostType type;
+
   public Post(long id, String blogName, String postUrl, Instant postedInstant,
-          Instant retrievedInstant, Collection<String> tags, String title, String body) {
+          Instant retrievedInstant, Collection<String> tags, PostType type, String title,
+          String body) {
     Preconditions.checkNotNull(blogName);
     Preconditions.checkNotNull(postUrl);
     Preconditions.checkNotNull(postedInstant);
     Preconditions.checkNotNull(retrievedInstant);
     Preconditions.checkNotNull(tags);
+    Preconditions.checkNotNull(type);
     Preconditions.checkNotNull(title);
     Preconditions.checkNotNull(body);
 
@@ -48,6 +52,7 @@ public class Post {
     this.postedInstant = postedInstant;
     this.retrievedInstant = retrievedInstant;
     this.tags = ImmutableSet.copyOf(tags);
+    this.type = type;
     this.title = title;
     this.body = body;
   }
@@ -67,6 +72,7 @@ public class Post {
             && Objects.equals(this.postedInstant, otherPost.postedInstant)
             && Objects.equals(this.retrievedInstant, otherPost.retrievedInstant)
             && Objects.equals(this.tags, otherPost.tags)
+            && Objects.equals(this.type, otherPost.type)
             && Objects.equals(this.title, otherPost.title)
             && Objects.equals(this.body, otherPost.body);
   }
@@ -103,8 +109,12 @@ public class Post {
     return title;
   }
 
+  public PostType getType() {
+    return type;
+  }
+
   @Override
   public int hashCode() {
-    return Objects.hash(id, blogName, postUrl, postedInstant, retrievedInstant, tags, title, body);
+    return Objects.hash(id, blogName, postUrl, postedInstant, retrievedInstant, tags, type, title, body);
   }
 }

@@ -13,6 +13,7 @@ import java.util.Set;
 import org.joda.time.Instant;
 
 import cc.bran.tumblr.types.Post;
+import cc.bran.tumblr.types.PostType;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -46,7 +47,7 @@ public class SqlitePostDb implements PostDb {
   @Override
   public Post get(long id) throws SQLException {
     try (PreparedStatement postRequestStatement = connection
-            .prepareStatement("SELECT posts.blogName, posts.postUrl, posts.postedTimestamp, posts.retrievedTimestamp, textPosts.title, textPosts.body FROM posts JOIN textPosts ON posts.id = textPosts.id WHERE posts.id = ?;");
+            .prepareStatement("SELECT posts.blogName, posts.postUrl, posts.postedTimestamp, posts.retrievedTimestamp, posts.type, textPosts.title, textPosts.body FROM posts JOIN textPosts ON posts.id = textPosts.id WHERE posts.id = ?;");
             PreparedStatement tagsRequestStatement = connection
                     .prepareStatement("SELECT tags.tag FROM postTags JOIN tags ON postTags.tagId = tags.id WHERE postTags.postId = ?;")) {
       postRequestStatement.setLong(1, id);
@@ -56,9 +57,10 @@ public class SqlitePostDb implements PostDb {
       String postUrl;
       Instant postedInstant;
       Instant retrievedInstant;
+      Set<String> tags = new HashSet<String>();
+      PostType type;
       String title;
       String body;
-      Set<String> tags = new HashSet<String>();
 
       // Get main data.
       try (ResultSet resultSet = postRequestStatement.executeQuery()) {
@@ -71,6 +73,7 @@ public class SqlitePostDb implements PostDb {
         postUrl = resultSet.getString("postUrl");
         postedInstant = new Instant(resultSet.getLong("postedTimestamp"));
         retrievedInstant = new Instant(resultSet.getLong("retrievedTimestamp"));
+        type = PostType.valueOf(resultSet.getString("type"));
         title = resultSet.getString("title");
         body = resultSet.getString("body");
       }
@@ -83,7 +86,8 @@ public class SqlitePostDb implements PostDb {
 
       connection.commit();
 
-      return new Post(id, blogName, postUrl, postedInstant, retrievedInstant, tags, title, body);
+      return new Post(id, blogName, postUrl, postedInstant, retrievedInstant, tags, type, title,
+              body);
     } catch (SQLException exception) {
       connection.rollback();
       throw exception;
@@ -93,7 +97,7 @@ public class SqlitePostDb implements PostDb {
   @Override
   public void put(Post post) throws SQLException {
     try (PreparedStatement postsInsertStatement = connection
-            .prepareStatement("INSERT OR REPLACE INTO posts (id, blogName, postUrl, postedTimestamp, retrievedTimestamp) VALUES (?, ?, ?, ?, ?);");
+            .prepareStatement("INSERT OR REPLACE INTO posts (id, blogName, postUrl, postedTimestamp, retrievedTimestamp, type) VALUES (?, ?, ?, ?, ?, ?);");
             PreparedStatement textPostsInsertStatement = connection
                     .prepareStatement("INSERT OR REPLACE INTO textPosts (id, title, body) VALUES (?, ?, ?);");
             PreparedStatement postTagsDeleteStatement = connection
@@ -110,6 +114,7 @@ public class SqlitePostDb implements PostDb {
       postsInsertStatement.setString(3, post.getPostUrl());
       postsInsertStatement.setLong(4, post.getPostedInstant().getMillis());
       postsInsertStatement.setLong(5, post.getRetrievedInstant().getMillis());
+      postsInsertStatement.setString(6, post.getType().toString());
       postsInsertStatement.execute();
 
       // Update textPosts table.
@@ -183,7 +188,7 @@ public class SqlitePostDb implements PostDb {
       statement.execute("PRAGMA foreign_keys = ON;");
 
       statement
-              .execute("CREATE TABLE IF NOT EXISTS posts(id INTEGER PRIMARY KEY, blogName TEXT NOT NULL, postUrl TEXT NOT NULL, postedTimestamp INTEGER NOT NULL, retrievedTimestamp INTEGER NOT NULL, type TEXT NOT NULL DEFAULT ('text') REFERENCES postTypes(type));");
+              .execute("CREATE TABLE IF NOT EXISTS posts(id INTEGER PRIMARY KEY, blogName TEXT NOT NULL, postUrl TEXT NOT NULL, postedTimestamp INTEGER NOT NULL, retrievedTimestamp INTEGER NOT NULL, type TEXT NOT NULL REFERENCES postTypes(type));");
       statement
               .execute("CREATE TABLE IF NOT EXISTS textPosts(id INTEGER PRIMARY KEY REFERENCES posts(id), title TEXT NOT NULL, body TEXT NOT NULL);");
 
@@ -194,7 +199,14 @@ public class SqlitePostDb implements PostDb {
 
       statement
               .execute("CREATE TABLE IF NOT EXISTS postTypes(id INTEGER PRIMARY KEY AUTOINCREMENT, type STRING UNIQUE NOT NULL);");
-      statement.execute("INSERT OR IGNORE INTO postTypes (type) VALUES ('text');");
+      try (PreparedStatement typeInsertStatement = connection
+              .prepareStatement("INSERT OR IGNORE INTO postTypes (type) VALUES (?)")) {
+        for (PostType type : PostType.values()) {
+          typeInsertStatement.setString(1, type.toString());
+          typeInsertStatement.addBatch();
+        }
+        typeInsertStatement.executeBatch();
+      }
 
       statement.execute("CREATE INDEX IF NOT EXISTS postsTypeIndex ON posts(type);");
       statement.execute("CREATE UNIQUE INDEX IF NOT EXISTS tagsTagIndex on tags(tag);");
