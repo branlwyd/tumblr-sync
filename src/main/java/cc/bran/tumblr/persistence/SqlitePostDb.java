@@ -14,6 +14,7 @@ import org.joda.time.Instant;
 
 import cc.bran.tumblr.types.Post;
 import cc.bran.tumblr.types.PostType;
+import cc.bran.tumblr.types.TextPost;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -86,8 +87,7 @@ public class SqlitePostDb implements PostDb {
 
       connection.commit();
 
-      return new Post(id, blogName, postUrl, postedInstant, retrievedInstant, tags, type, title,
-              body);
+      return new TextPost(id, blogName, postUrl, postedInstant, retrievedInstant, tags, title, body);
     } catch (SQLException exception) {
       connection.rollback();
       throw exception;
@@ -108,33 +108,35 @@ public class SqlitePostDb implements PostDb {
                     .prepareStatement("INSERT INTO tags (tag) VALUES (?);");
             PreparedStatement postTagsInsertStatement = connection
                     .prepareStatement("INSERT INTO postTags (postId, tagId) VALUES (?, ?);")) {
+      TextPost textPost = (TextPost) post;
+
       // Update posts table.
-      postsInsertStatement.setLong(1, post.getId());
-      postsInsertStatement.setString(2, post.getBlogName());
-      postsInsertStatement.setString(3, post.getPostUrl());
-      postsInsertStatement.setLong(4, post.getPostedInstant().getMillis());
-      postsInsertStatement.setLong(5, post.getRetrievedInstant().getMillis());
-      postsInsertStatement.setString(6, post.getType().toString());
+      postsInsertStatement.setLong(1, textPost.getId());
+      postsInsertStatement.setString(2, textPost.getBlogName());
+      postsInsertStatement.setString(3, textPost.getPostUrl());
+      postsInsertStatement.setLong(4, textPost.getPostedInstant().getMillis());
+      postsInsertStatement.setLong(5, textPost.getRetrievedInstant().getMillis());
+      postsInsertStatement.setString(6, textPost.getType().toString());
       postsInsertStatement.execute();
 
       // Update textPosts table.
-      textPostsInsertStatement.setLong(1, post.getId());
-      textPostsInsertStatement.setString(2, post.getTitle());
-      textPostsInsertStatement.setString(3, post.getBody());
+      textPostsInsertStatement.setLong(1, textPost.getId());
+      textPostsInsertStatement.setString(2, textPost.getTitle());
+      textPostsInsertStatement.setString(3, textPost.getBody());
       textPostsInsertStatement.execute();
 
       // Remove old entries from postTags table.
-      postTagsDeleteStatement.setLong(1, post.getId());
+      postTagsDeleteStatement.setLong(1, textPost.getId());
       postTagsDeleteStatement.execute();
 
-      if (!post.getTags().isEmpty()) {
+      if (!textPost.getTags().isEmpty()) {
         // Look up existing tags.
         int index = 1;
-        for (String tag : post.getTags()) {
+        for (String tag : textPost.getTags()) {
           tagsSelectStatement.setString(index++, tag);
         }
         Set<Integer> tagIds = new HashSet<>();
-        Set<String> missingTags = new HashSet<>(post.getTags());
+        Set<String> missingTags = new HashSet<>(textPost.getTags());
         try (ResultSet resultSet = tagsSelectStatement.executeQuery()) {
           while (resultSet.next()) {
             tagIds.add(resultSet.getInt("id"));
@@ -156,7 +158,7 @@ public class SqlitePostDb implements PostDb {
         // Insert new entries into postTags table.
         if (!tagIds.isEmpty()) {
           for (Integer tagId : tagIds) {
-            postTagsInsertStatement.setLong(1, post.getId());
+            postTagsInsertStatement.setLong(1, textPost.getId());
             postTagsInsertStatement.setInt(2, tagId);
             postTagsInsertStatement.addBatch();
           }

@@ -8,13 +8,12 @@ import org.joda.time.Instant;
 
 import sun.reflect.generics.reflectiveObjects.NotImplementedException;
 import cc.bran.tumblr.types.Post;
-import cc.bran.tumblr.types.PostType;
+import cc.bran.tumblr.types.TextPost;
 
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableMap;
 import com.tumblr.jumblr.JumblrClient;
-import com.tumblr.jumblr.types.TextPost;
 
 /**
  * A {@link TumblrApi} implementation backed by the Jumblr API.
@@ -102,12 +101,12 @@ public class JumblrTumblrApi implements TumblrApi {
   }
 
   private static Post fromJumblrPost(com.tumblr.jumblr.types.Post post, Instant retrievedInstant) {
-    Preconditions.checkArgument(post instanceof TextPost);
-    TextPost textPost = (TextPost) post;
+    Preconditions.checkArgument(post instanceof com.tumblr.jumblr.types.TextPost);
+    com.tumblr.jumblr.types.TextPost textPost = (com.tumblr.jumblr.types.TextPost) post;
     Instant postedInstant = new Instant(MILLIS_PER_SECOND * textPost.getTimestamp());
 
-    return new Post(textPost.getId(), textPost.getBlogName(), textPost.getPostUrl(), postedInstant,
-            retrievedInstant, textPost.getTags(), PostType.valueOf(textPost.getType().toUpperCase()),
-            Strings.nullToEmpty(textPost.getTitle()), textPost.getBody());
+    return new TextPost(textPost.getId(), textPost.getBlogName(), textPost.getPostUrl(),
+            postedInstant, retrievedInstant, textPost.getTags(), Strings.nullToEmpty(textPost
+                    .getTitle()), textPost.getBody());
   }
 }

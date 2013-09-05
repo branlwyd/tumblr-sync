@@ -10,15 +10,13 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
 
 /**
- * Represents a Tumblr text post that may be persisted.
+ * Represents a Tumblr post that may be persisted.
  * 
  * @author Brandon Pitman (brandon.pitman@gmail.com)
  */
-public class Post {
+public abstract class Post {
 
   private final String blogName;
-
-  private final String body;
 
   private final long id;
 
@@ -30,21 +28,13 @@ public class Post {
 
   private final Set<String> tags;
 
-  private final String title;
-
-  private final PostType type;
-
   public Post(long id, String blogName, String postUrl, Instant postedInstant,
-          Instant retrievedInstant, Collection<String> tags, PostType type, String title,
-          String body) {
+          Instant retrievedInstant, Collection<String> tags) {
     Preconditions.checkNotNull(blogName);
     Preconditions.checkNotNull(postUrl);
     Preconditions.checkNotNull(postedInstant);
     Preconditions.checkNotNull(retrievedInstant);
     Preconditions.checkNotNull(tags);
-    Preconditions.checkNotNull(type);
-    Preconditions.checkNotNull(title);
-    Preconditions.checkNotNull(body);
 
     this.id = id;
     this.blogName = blogName;
@@ -52,9 +42,6 @@ public class Post {
     this.postedInstant = postedInstant;
     this.retrievedInstant = retrievedInstant;
     this.tags = ImmutableSet.copyOf(tags);
-    this.type = type;
-    this.title = title;
-    this.body = body;
   }
 
   @Override
@@ -71,18 +58,11 @@ public class Post {
             && Objects.equals(this.postUrl, otherPost.postUrl)
             && Objects.equals(this.postedInstant, otherPost.postedInstant)
             && Objects.equals(this.retrievedInstant, otherPost.retrievedInstant)
-            && Objects.equals(this.tags, otherPost.tags)
-            && Objects.equals(this.type, otherPost.type)
-            && Objects.equals(this.title, otherPost.title)
-            && Objects.equals(this.body, otherPost.body);
+            && Objects.equals(this.tags, otherPost.tags);
   }
 
   public String getBlogName() {
     return blogName;
-  }
-
-  public String getBody() {
-    return body;
   }
 
   public long getId() {
@@ -105,16 +85,10 @@ public class Post {
     return tags;
   }
 
-  public String getTitle() {
-    return title;
-  }
-
-  public PostType getType() {
-    return type;
-  }
+  public abstract PostType getType();
 
   @Override
   public int hashCode() {
-    return Objects.hash(id, blogName, postUrl, postedInstant, retrievedInstant, tags, type, title, body);
+    return Objects.hash(id, blogName, postUrl, postedInstant, retrievedInstant, tags);
   }
 }
