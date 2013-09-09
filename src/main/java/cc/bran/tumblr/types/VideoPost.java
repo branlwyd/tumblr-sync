@@ -29,12 +29,27 @@ public class VideoPost extends Post {
       this.embedCode = embedCode;
     }
 
+    @Override
+    public boolean equals(Object other) {
+      if (!(other instanceof Video)) {
+        return false;
+      }
+      Video otherVideo = (Video) other;
+      return Objects.equals(this.width, otherVideo.width)
+              && Objects.equals(this.embedCode, otherVideo.embedCode);
+    }
+
     public String getEmbedCode() {
       return embedCode;
     }
 
     public int getWidth() {
       return width;
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(width, embedCode);
     }
   }
 
