@@ -99,7 +99,7 @@ public class SqlitePostDb implements PostDb {
   @Override
   public void put(Post post) throws SQLException {
     try (PreparedStatement postsInsertStatement = connection
-            .prepareStatement("INSERT OR REPLACE INTO posts (id, blogName, postUrl, postedTimestamp, retrievedTimestamp, postTypeId) SELECT ?, ?, ?, ?, ?, id FROM tags WHERE tag = ?;");
+            .prepareStatement("INSERT OR REPLACE INTO posts (id, blogName, postUrl, postedTimestamp, retrievedTimestamp, postTypeId) SELECT ?, ?, ?, ?, ?, id FROM postTypes WHERE type = ?;");
             PreparedStatement textPostsInsertStatement = connection
                     .prepareStatement("INSERT OR REPLACE INTO textPosts (id, title, body) VALUES (?, ?, ?);");
             PreparedStatement postTagsDeleteStatement = connection
