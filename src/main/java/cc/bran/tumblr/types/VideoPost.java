@@ -1,0 +1,85 @@
+package cc.bran.tumblr.types;
+
+import java.util.Collection;
+import java.util.List;
+import java.util.Objects;
+
+import org.joda.time.Instant;
+
+import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
+
+/**
+ * Represents a Tumblr video post.
+ * 
+ * @author Brandon Pitman (brandon.pitman@gmail.com)
+ */
+public class VideoPost extends Post {
+
+  public static class Video {
+
+    private final String embedCode;
+
+    private final int width;
+
+    public Video(int width, String embedCode) {
+      Preconditions.checkNotNull(embedCode);
+
+      this.width = width;
+      this.embedCode = embedCode;
+    }
+
+    public String getEmbedCode() {
+      return embedCode;
+    }
+
+    public int getWidth() {
+      return width;
+    }
+  }
+
+  private final String caption;
+
+  private final List<Video> players;
+
+  public VideoPost(long id, String blogName, String postUrl, Instant postedInstant,
+          Instant retrievedInstant, Collection<String> tags, String caption, List<Video> players) {
+    super(id, blogName, postUrl, postedInstant, retrievedInstant, tags);
+    Preconditions.checkNotNull(caption);
+    Preconditions.checkNotNull(players);
+
+    this.caption = caption;
+    this.players = ImmutableList.copyOf(players);
+  }
+
+  @Override
+  public boolean equals(Object other) {
+    if (!super.equals(other)) {
+      return false;
+    }
+    if (!(other instanceof VideoPost)) {
+      return false;
+    }
+    VideoPost otherPost = (VideoPost) other;
+    return Objects.equals(this.caption, otherPost.caption)
+            && Objects.equals(this.players, otherPost.players);
+  }
+
+  public String getCaption() {
+    return caption;
+  }
+
+  public List<Video> getPlayers() {
+    return players;
+  }
+
+  @Override
+  public PostType getType() {
+    return PostType.VIDEO;
+  }
+
+  @Override
+  public int hashCode() {
+    return Objects.hash(super.hashCode(), caption, players);
+  }
+}
