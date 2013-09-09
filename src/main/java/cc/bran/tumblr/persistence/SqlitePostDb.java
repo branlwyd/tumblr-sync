@@ -23,6 +23,8 @@ import com.google.common.annotations.VisibleForTesting;
  * 
  * @author Brandon Pitman (brandon.pitman@gmail.com)
  */
+// TODO(bpitman): don't re-prepare statements with every call to
+// get()/post()/etc
 public class SqlitePostDb implements PostDb {
 
   static {
@@ -48,7 +50,7 @@ public class SqlitePostDb implements PostDb {
   @Override
   public Post get(long id) throws SQLException {
     try (PreparedStatement postRequestStatement = connection
-            .prepareStatement("SELECT posts.blogName, posts.postUrl, posts.postedTimestamp, posts.retrievedTimestamp, posts.type, textPosts.title, textPosts.body FROM posts JOIN textPosts ON posts.id = textPosts.id WHERE posts.id = ?;");
+            .prepareStatement("SELECT posts.blogName, posts.postUrl, posts.postedTimestamp, posts.retrievedTimestamp, postTypes.type, textPosts.title, textPosts.body FROM posts JOIN textPosts ON posts.id = textPosts.id JOIN postTypes ON posts.postTypeId = postTypes.id WHERE posts.id = ?;");
             PreparedStatement tagsRequestStatement = connection
                     .prepareStatement("SELECT tags.tag FROM postTags JOIN tags ON postTags.tagId = tags.id WHERE postTags.postId = ?;")) {
       postRequestStatement.setLong(1, id);
@@ -97,7 +99,7 @@ public class SqlitePostDb implements PostDb {
   @Override
   public void put(Post post) throws SQLException {
     try (PreparedStatement postsInsertStatement = connection
-            .prepareStatement("INSERT OR REPLACE INTO posts (id, blogName, postUrl, postedTimestamp, retrievedTimestamp, type) VALUES (?, ?, ?, ?, ?, ?);");
+            .prepareStatement("INSERT OR REPLACE INTO posts (id, blogName, postUrl, postedTimestamp, retrievedTimestamp, postTypeId) SELECT ?, ?, ?, ?, ?, id FROM tags WHERE tag = ?;");
             PreparedStatement textPostsInsertStatement = connection
                     .prepareStatement("INSERT OR REPLACE INTO textPosts (id, title, body) VALUES (?, ?, ?);");
             PreparedStatement postTagsDeleteStatement = connection
@@ -189,16 +191,55 @@ public class SqlitePostDb implements PostDb {
 
       statement.execute("PRAGMA foreign_keys = ON;");
 
+      // Main post tables.
       statement
-              .execute("CREATE TABLE IF NOT EXISTS posts(id INTEGER PRIMARY KEY, blogName TEXT NOT NULL, postUrl TEXT NOT NULL, postedTimestamp INTEGER NOT NULL, retrievedTimestamp INTEGER NOT NULL, type TEXT NOT NULL REFERENCES postTypes(type));");
+              .execute("CREATE TABLE IF NOT EXISTS posts(id INTEGER PRIMARY KEY, blogName TEXT NOT NULL, postUrl TEXT NOT NULL, postedTimestamp INTEGER NOT NULL, retrievedTimestamp INTEGER NOT NULL, postTypeId INTEGER NOT NULL REFERENCES postTypes(id));");
       statement
               .execute("CREATE TABLE IF NOT EXISTS textPosts(id INTEGER PRIMARY KEY REFERENCES posts(id), title TEXT NOT NULL, body TEXT NOT NULL);");
-
       statement
-              .execute("CREATE TABLE IF NOT EXISTS tags(id INTEGER PRIMARY KEY ASC AUTOINCREMENT, tag TEXT UNIQUE NOT NULL);");
+              .execute("CREATE TABLE IF NOT EXISTS photoPosts(id INTEGER PRIMARY KEY REFERENCES posts(id), caption TEXT NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL);");
+      statement
+              .execute("CREATE TABLE IF NOT EXISTS quotePosts(id INTEGER PRIMARY KEY REFERENCES posts(id), text TEXT NOT NULL, source TEXT NOT NULL);");
+      statement
+              .execute("CREATE TABLE IF NOT EXISTS linkPosts(id INTEGER PRIMARY KEY REFERENCES posts(id), title TEXT NOT NULL, url TEXT NOT NULL, description TEXT NOT NULL);");
+      statement
+              .execute("CREATE TABLE IF NOT EXISTS chatPosts(id INTEGER PRIMARY KEY REFERENCES posts(id), title TEXT NOT NULL, body TEXT NOT NULL);");
+      statement
+              .execute("CREATE TABLE IF NOT EXISTS audioPosts(id INTEGER PRIMARY KEY REFERENCES posts(id), caption TEXT NOT NULL, player TEXT NOT NULL, plays INTEGER NOT NULL, albumArt TEXT NOT NULL, artist TEXT NOT NULL, album TEXT NOT NULL, trackName TEXT NOT NULL, trackNumber INTEGER NOT NULL, year INTEGER NOT NULL);");
+      statement
+              .execute("CREATE TABLE IF NOT EXISTS videoPosts(id INTEGER PRIMARY KEY REFERENCES posts(id), caption TEXT NOT NULL);");
+      statement
+              .execute("CREATE TABLE IF NOT EXISTS answerPosts(id INTEGER PRIMARY KEY REFERENCES posts(id), askingName TEXT NOT NULL, askingUrl TEXT NOT NULL, question TEXT NOT NULL, answer TEXT NOT NULL);");
+
+      // Tags tables.
+      statement
+              .execute("CREATE TABLE IF NOT EXISTS tags(id INTEGER PRIMARY KEY AUTOINCREMENT, tag TEXT UNIQUE NOT NULL);");
       statement
               .execute("CREATE TABLE IF NOT EXISTS postTags(postId INTEGER NOT NULL REFERENCES posts(id), tagId INTEGER NOT NULL REFERENCES tags(id), PRIMARY KEY(postId, tagId));");
 
+      // Photo post-specific tables.
+      statement
+              .execute("CREATE TABLE IF NOT EXISTS photos(id INTEGER PRIMARY KEY AUTOINCREMENT, caption TEXT NOT NULL);");
+      statement
+              .execute("CREATE TABLE IF NOT EXISTS photoSizes(id INTEGER PRIMARY KEY AUTOINCREMENT, width INTEGER NOT NULL, height INTEGER NOT NULL, url TEXT NOT NULL);");
+      statement
+              .execute("CREATE TABLE IF NOT EXISTS photoPostPhotos(postId INTEGER NOT NULL REFERENCES photoPosts(id), photoId INTEGER NOT NULL REFERENCES photos(id), photoIndex INTEGER NOT NULL, PRIMARY KEY(postId, photoId));");
+      statement
+              .execute("CREATE TABLE IF NOT EXISTS photoPhotoSizes(photoId INTEGER NOT NULL REFERENCES photos(id), photoSizeId INTEGER NOT NULL REFERENCES photoSizes(id), photoSizeIndex INTEGER NOT NULL, PRIMARY KEY(photoId, photoSizeId));");
+
+      // Chat post-specific tables.
+      statement
+              .execute("CREATE TABLE IF NOT EXISTS dialogue(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, label TEXT NOT NULL, phrase TEXT NOT NULL);");
+      statement
+              .execute("CREATE TABLE IF NOT EXISTS chatPostDialogue(postId INTEGER NOT NULL REFERENCES chatPosts(id), dialogueId INTEGER NOT NULL REFERENCES dialogue(id), dialogueIndex INTEGER NOT NULL, PRIMARY KEY(postId, dialogueId));");
+
+      // Video post-specific tables.
+      statement
+              .execute("CREATE TABLE IF NOT EXISTS players(id INTEGER PRIMARY KEY AUTOINCREMENT, width TEXT NOT NULL, embedCode TEXT NOT NULL);");
+      statement
+              .execute("CREATE TABLE IF NOT EXISTS videoPostPlayers(postId INTEGER NOT NULL REFERENCES videoPosts(id), playerId INTEGER NOT NULL REFERENCES players(id), playerIndex INTEGER NOT NULL, PRIMARY KEY(postId, playerId));");
+
+      // Types table.
       statement
               .execute("CREATE TABLE IF NOT EXISTS postTypes(id INTEGER PRIMARY KEY AUTOINCREMENT, type STRING UNIQUE NOT NULL);");
       try (PreparedStatement typeInsertStatement = connection
@@ -210,10 +251,27 @@ public class SqlitePostDb implements PostDb {
         typeInsertStatement.executeBatch();
       }
 
-      statement.execute("CREATE INDEX IF NOT EXISTS postsTypeIndex ON posts(type);");
-      statement.execute("CREATE UNIQUE INDEX IF NOT EXISTS tagsTagIndex on tags(tag);");
+      // Indexes.
+      statement.execute("CREATE INDEX IF NOT EXISTS postsPostTypeIdIndex ON posts(postTypeId);");
       statement.execute("CREATE INDEX IF NOT EXISTS postTagsPostIdIndex ON postTags(postId);");
       statement.execute("CREATE INDEX IF NOT EXISTS postTagsTagIdIndex ON postTags(tagId);");
+      statement.execute("CREATE INDEX IF NOT EXISTS tagsTagIndex ON tags(tag);");
+      statement
+              .execute("CREATE INDEX IF NOT EXISTS photoPostPhotosPostIdIndex ON photoPostPhotos(postId);");
+      statement
+              .execute("CREATE INDEX IF NOT EXISTS photoPostPhotosPhotoIdIndex ON photoPostPhotos(photoId);");
+      statement
+              .execute("CREATE INDEX IF NOT EXISTS photoPhotoSizesPhotoIdIndex ON photoPhotoSizes(photoId);");
+      statement
+              .execute("CREATE INDEX IF NOT EXISTS photoPhotoSizesPhotoSizeIdIndex ON photoPhotoSizes(photoSizeId);");
+      statement
+              .execute("CREATE INDEX IF NOT EXISTS chatPostDialoguePostIdIndex ON chatPostDialogue(postId);");
+      statement
+              .execute("CREATE INDEX IF NOT EXISTS chatPostDialogueDialogueIdIndex ON chatPostDialogue(dialogueId);");
+      statement
+              .execute("CREATE INDEX IF NOT EXISTS videoPostPlayersPostIdIndex ON videoPostPlayers(postId);");
+      statement
+              .execute("CREATE INDEX IF NOT EXISTS videoPostPlayersPlayerIdIndex ON videoPostPlayers(playerId);");
       statement.execute("CREATE UNIQUE INDEX IF NOT EXISTS postTypesTypeIndex ON postTypes(type);");
 
       connection.commit();
