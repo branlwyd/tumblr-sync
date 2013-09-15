@@ -12,4 +12,6 @@ public interface PostDb {
   Post get(long id) throws Exception;
 
   void put(Post post) throws Exception;
+  
+  void delete(long id) throws Exception;
 }

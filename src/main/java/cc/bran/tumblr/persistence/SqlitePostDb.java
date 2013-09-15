@@ -88,7 +88,11 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
 
   private static final String DELETE_POST_TAGS_SQL_TEMPLATE = "DELETE FROM postTags WHERE postId IN (%s);";
 
-  private static final String POST_INSERT_SQL = "INSERT OR REPLACE INTO posts (id, blogName, postUrl, postedTimestamp, retrievedTimestamp, postTypeId) SELECT ?, ?, ?, ?, ?, id FROM postTypes WHERE type = ?;";
+  private static final String DELETE_POSTS_SQL_TEMPLATE = "DELETE FROM posts WHERE id IN (%s)";
+
+  private static final String DELETE_TEXT_POSTS_SQL_TEMPLATE = "DELETE FROM textPosts WHERE id IN (%s);";
+
+  private static final String POST_INSERT_SQL = "INSERT INTO posts (id, blogName, postUrl, postedTimestamp, retrievedTimestamp, postTypeId) SELECT ?, ?, ?, ?, ?, id FROM postTypes WHERE type = ?;";
 
   private static final String POST_REQUEST_SQL = "SELECT posts.id, posts.blogName, posts.postUrl, posts.postedTimestamp, posts.retrievedTimestamp, postTypes.type FROM posts JOIN postTypes ON posts.postTypeId = postTypes.id WHERE posts.id = ?;";
 
@@ -100,7 +104,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
 
   private static final String TAGS_REQUEST_SQL_TEMPLATE = "SELECT postTags.postId, tags.tag FROM postTags JOIN tags ON postTags.tagId = tags.id WHERE postTags.postId IN (%s) ORDER BY postTags.tagIndex;";
 
-  private static final String TEXT_POST_INSERT_SQL = "INSERT OR REPLACE INTO textPosts (id, title, body) VALUES (?, ?, ?);";
+  private static final String TEXT_POST_INSERT_SQL = "INSERT INTO textPosts (id, title, body) VALUES (?, ?, ?);";
 
   private static final String TEXT_POST_REQUEST_SQL_TEMPLATE = "SELECT id, title, body FROM textPosts WHERE id IN (%s);";
 
@@ -147,6 +151,53 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     postTagInsertStatement.close();
     tagInsertStatement.close();
     textPostInsertStatement.close();
+  }
+
+  @Override
+  public void delete(final long id) throws Exception {
+    new Transaction<Void, SQLException>() {
+
+      @Override
+      Void runTransaction() throws SQLException {
+        doDelete(ImmutableList.of(id));
+        return null;
+      }
+    }.execute();
+  }
+
+  public void doDelete(Collection<Long> ids) throws SQLException {
+    // Delete text post-related data.
+    String deleteTextPostsSql = String.format(DELETE_TEXT_POSTS_SQL_TEMPLATE,
+            buildInQuery(ids.size()));
+    try (PreparedStatement deleteTextPostsStatement = connection
+            .prepareStatement(deleteTextPostsSql)) {
+      int index = 1;
+      for (long id : ids) {
+        deleteTextPostsStatement.setLong(index++, id);
+      }
+      deleteTextPostsStatement.execute();
+    }
+
+    // Delete tag-related data.
+    String deletePostTagsSql = String.format(DELETE_POST_TAGS_SQL_TEMPLATE,
+            buildInQuery(ids.size()));
+    try (PreparedStatement deletePostTagsStatement = connection.prepareStatement(deletePostTagsSql)) {
+      int index = 1;
+      for (long id : ids) {
+        deletePostTagsStatement.setLong(index++, id);
+      }
+      deletePostTagsStatement.execute();
+    }
+
+    // Delete post-related data.
+    String deletePostsSql = String.format(DELETE_POSTS_SQL_TEMPLATE, buildInQuery(ids.size()));
+    try (PreparedStatement deletePostsStatement = connection.prepareStatement(deletePostsSql)) {
+      int index = 1;
+      for (long id : ids) {
+        deletePostsStatement.setLong(index++, id);
+      }
+      deletePostsStatement.execute();
+    }
   }
 
   private Post doGet(long id) throws SQLException {
@@ -295,10 +346,9 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
       return;
     }
 
+    // Categorize post by type & update basic post information.
     Map<Long, Post> postById = new HashMap<>();
     Map<Long, TextPost> textPostById = new HashMap<>();
-
-    // Categorize post by type & update basic post information.
     for (Post post : posts) {
       postById.put(post.getId(), post);
 
@@ -324,7 +374,13 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
         throw new AssertionError(String.format("Post %d has impossible type %s.", post.getId(),
                 post.getType().toString()));
       }
+    }
 
+    // Delete existing post information.
+    doDelete(postById.keySet());
+
+    // Update basic post information.
+    for (Post post : posts) {
       postInsertStatement.setLong(1, post.getId());
       postInsertStatement.setString(2, post.getBlogName());
       postInsertStatement.setString(3, post.getPostUrl());
@@ -333,7 +389,6 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
       postInsertStatement.setString(6, post.getType().toString());
       postInsertStatement.addBatch();
     }
-
     postInsertStatement.executeBatch();
 
     // Update tag & post-type specific information.
@@ -344,17 +399,6 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
   private void doPutTagData(Map<Long, Post> postById) throws SQLException {
     if (postById.isEmpty()) {
       return;
-    }
-
-    // Delete existing postTags data.
-    String deletePostTagsSql = String.format(DELETE_POST_TAGS_SQL_TEMPLATE,
-            buildInQuery(postById.size()));
-    try (PreparedStatement deletePostTagsStatement = connection.prepareStatement(deletePostTagsSql)) {
-      int index = 1;
-      for (long id : postById.keySet()) {
-        deletePostTagsStatement.setLong(index++, id);
-      }
-      deletePostTagsStatement.execute();
     }
 
     // Find IDs for existing tags.
