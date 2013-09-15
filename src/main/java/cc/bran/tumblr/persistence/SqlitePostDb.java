@@ -1,20 +1,15 @@
 package cc.bran.tumblr.persistence;
 
-import java.io.Closeable;
 import java.io.File;
-import java.io.IOException;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import org.joda.time.Instant;
 
@@ -22,7 +17,6 @@ import sun.reflect.generics.reflectiveObjects.NotImplementedException;
 import cc.bran.tumblr.types.AnswerPost;
 import cc.bran.tumblr.types.AudioPost;
 import cc.bran.tumblr.types.ChatPost;
-import cc.bran.tumblr.types.ChatPost.Builder;
 import cc.bran.tumblr.types.LinkPost;
 import cc.bran.tumblr.types.PhotoPost;
 import cc.bran.tumblr.types.Post;
@@ -91,6 +85,12 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     abstract E runTransaction() throws Ex;
   }
 
+  private static final String POST_REQUEST_SQL = "SELECT posts.id, posts.blogName, posts.postUrl, posts.postedTimestamp, posts.retrievedTimestamp, postTypes.type FROM posts JOIN postTypes ON posts.postTypeId = postTypes.id WHERE posts.id = ?;";
+
+  private static final String TAGS_REQUEST_SQL_TEMPLATE = "SELECT postTags.postId, tags.tag FROM postTags JOIN tags ON postTags.tagId = tags.id WHERE postTags.postId IN (%s) ORDER BY postTags.tagIndex;";
+
+  private static final String TEXT_POST_REQUEST_SQL_TEMPLATE = "SELECT id, title, body FROM textPosts WHERE id IN (%s);";
+
   static {
     try {
       Class.forName("org.sqlite.JDBC");
@@ -99,15 +99,9 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     }
   }
 
-  private static final String TAGS_REQUEST_SQL_TEMPLATE = "SELECT postTags.postId, tags.tag FROM postTags JOIN tags ON postTags.tagId = tags.id WHERE postTags.postId IN (%s) ORDER BY postTags.tagIndex;";
-
-  private static final String TEXT_POST_REQUEST_SQL_TEMPLATE = "SELECT id, title, body FROM textPosts WHERE id IN (%s);";
-
-  private static final String POST_REQUEST_SQL = "SELECT posts.id, posts.blogName, posts.postUrl, posts.postedTimestamp, posts.retrievedTimestamp, postTypes.type FROM posts JOIN postTypes ON posts.postTypeId = postTypes.id WHERE posts.id = ?;";
+  private final Connection connection;
 
   private final PreparedStatement postRequestStatement;
-
-  private final Connection connection;
 
   @VisibleForTesting
   SqlitePostDb(Connection connection) throws SQLException {
@@ -121,68 +115,21 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     this(DriverManager.getConnection(String.format("jdbc:sqlite:%s", new File(dbFile).getPath())));
   }
 
-  private void doGetTagData(Map<Long, Post.Builder> builderById) throws SQLException {
-    if (builderById.isEmpty()) {
-      return;
-    }
-
-    // Prepare data structures.
-    Map<Long, ImmutableList.Builder<String>> tagListBuilderById = new HashMap<>();
-    for (long id : builderById.keySet()) {
-      tagListBuilderById.put(id, new ImmutableList.Builder<String>());
-    }
-
-    // Request tags & parse data into structure.
-    String tagRequestSql = String.format(TAGS_REQUEST_SQL_TEMPLATE,
-            buildInQuery(builderById.size()));
-    try (PreparedStatement tagRequestStatement = connection.prepareStatement(tagRequestSql)) {
-      int index = 1;
-      for (long id : builderById.keySet()) {
-        tagRequestStatement.setLong(index++, id);
-      }
-
-      try (ResultSet resultSet = tagRequestStatement.executeQuery()) {
-        while (resultSet.next()) {
-          long id = resultSet.getLong("postId");
-          String tag = resultSet.getString("tag");
-
-          tagListBuilderById.get(id).add(tag);
-        }
-      }
-    }
-
-    // Place parsed tags into post builders.
-    for (Map.Entry<Long, Post.Builder> entry : builderById.entrySet()) {
-      long id = entry.getKey();
-      Post.Builder postBuilder = entry.getValue();
-
-      postBuilder.setTags(tagListBuilderById.get(id).build());
-    }
+  @Override
+  public void close() throws Exception {
+    postRequestStatement.close();
   }
 
-  private void doGetTextPostData(Map<Long, TextPost.Builder> builderById) throws SQLException {
-    if (builderById.isEmpty()) {
-      return;
-    }
+  private Post doGet(long id) throws SQLException {
+    postRequestStatement.setLong(1, id);
+    try (ResultSet resultSet = postRequestStatement.executeQuery()) {
+      List<Post> postList = doGetFromResultSet(resultSet);
 
-    // Request text post data & place into post builders.
-    String textPostRequestSql = String.format(TEXT_POST_REQUEST_SQL_TEMPLATE,
-            buildInQuery(builderById.size()));
-    try (PreparedStatement textPostRequestStatement = connection
-            .prepareStatement(textPostRequestSql)) {
-      int index = 1;
-      for (long id : builderById.keySet()) {
-        textPostRequestStatement.setLong(index++, id);
+      if (postList.isEmpty()) {
+        return null;
       }
 
-      try (ResultSet resultSet = textPostRequestStatement.executeQuery()) {
-        while (resultSet.next()) {
-          long id = resultSet.getLong("id");
-          TextPost.Builder builder = builderById.get(id);
-          builder.setTitle(resultSet.getString("title"));
-          builder.setBody(resultSet.getString("body"));
-        }
-      }
+      return postList.get(0);
     }
   }
 
@@ -249,16 +196,68 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     return resultBuilder.build();
   }
 
-  private Post doGet(long id) throws SQLException {
-    postRequestStatement.setLong(1, id);
-    try (ResultSet resultSet = postRequestStatement.executeQuery()) {
-      List<Post> postList = doGetFromResultSet(resultSet);
+  private void doGetTagData(Map<Long, Post.Builder> builderById) throws SQLException {
+    if (builderById.isEmpty()) {
+      return;
+    }
 
-      if (postList.isEmpty()) {
-        return null;
+    // Prepare data structures.
+    Map<Long, ImmutableList.Builder<String>> tagListBuilderById = new HashMap<>();
+    for (long id : builderById.keySet()) {
+      tagListBuilderById.put(id, new ImmutableList.Builder<String>());
+    }
+
+    // Request tags & parse data into structure.
+    String tagRequestSql = String.format(TAGS_REQUEST_SQL_TEMPLATE,
+            buildInQuery(builderById.size()));
+    try (PreparedStatement tagRequestStatement = connection.prepareStatement(tagRequestSql)) {
+      int index = 1;
+      for (long id : builderById.keySet()) {
+        tagRequestStatement.setLong(index++, id);
       }
 
-      return postList.get(0);
+      try (ResultSet resultSet = tagRequestStatement.executeQuery()) {
+        while (resultSet.next()) {
+          long id = resultSet.getLong("postId");
+          String tag = resultSet.getString("tag");
+
+          tagListBuilderById.get(id).add(tag);
+        }
+      }
+    }
+
+    // Place parsed tags into post builders.
+    for (Map.Entry<Long, Post.Builder> entry : builderById.entrySet()) {
+      long id = entry.getKey();
+      Post.Builder postBuilder = entry.getValue();
+
+      postBuilder.setTags(tagListBuilderById.get(id).build());
+    }
+  }
+
+  private void doGetTextPostData(Map<Long, TextPost.Builder> builderById) throws SQLException {
+    if (builderById.isEmpty()) {
+      return;
+    }
+
+    // Request text post data & place into post builders.
+    String textPostRequestSql = String.format(TEXT_POST_REQUEST_SQL_TEMPLATE,
+            buildInQuery(builderById.size()));
+    try (PreparedStatement textPostRequestStatement = connection
+            .prepareStatement(textPostRequestSql)) {
+      int index = 1;
+      for (long id : builderById.keySet()) {
+        textPostRequestStatement.setLong(index++, id);
+      }
+
+      try (ResultSet resultSet = textPostRequestStatement.executeQuery()) {
+        while (resultSet.next()) {
+          long id = resultSet.getLong("id");
+          TextPost.Builder builder = builderById.get(id);
+          builder.setTitle(resultSet.getString("title"));
+          builder.setBody(resultSet.getString("body"));
+        }
+      }
     }
   }
 
@@ -479,10 +478,5 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     }
     builder.append(");");
     return builder.toString();
-  }
-
-  @Override
-  public void close() throws Exception {
-    postRequestStatement.close();
   }
 }
