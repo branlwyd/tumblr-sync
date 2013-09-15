@@ -7,6 +7,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -85,9 +86,21 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     abstract E runTransaction() throws Ex;
   }
 
+  private static final String DELETE_POST_TAGS_SQL_TEMPLATE = "DELETE FROM postTags WHERE postId IN (%s);";
+
+  private static final String POST_INSERT_SQL = "INSERT OR REPLACE INTO posts (id, blogName, postUrl, postedTimestamp, retrievedTimestamp, postTypeId) SELECT ?, ?, ?, ?, ?, id FROM postTypes WHERE type = ?;";
+
   private static final String POST_REQUEST_SQL = "SELECT posts.id, posts.blogName, posts.postUrl, posts.postedTimestamp, posts.retrievedTimestamp, postTypes.type FROM posts JOIN postTypes ON posts.postTypeId = postTypes.id WHERE posts.id = ?;";
 
+  private static final String POST_TAG_INSERT_SQL = "INSERT INTO postTags (postId, tagId, tagIndex) VALUES (?, ?, ?);";
+
+  private static final String TAG_INSERT_SQL = "INSERT INTO tags (tag) VALUES (?);";
+
+  private static final String TAG_REQUEST_BY_NAME_SQL_TEMPLATE = "SELECT id, tag FROM tags WHERE tag IN (%s);";
+
   private static final String TAGS_REQUEST_SQL_TEMPLATE = "SELECT postTags.postId, tags.tag FROM postTags JOIN tags ON postTags.tagId = tags.id WHERE postTags.postId IN (%s) ORDER BY postTags.tagIndex;";
+
+  private static final String TEXT_POST_INSERT_SQL = "INSERT OR REPLACE INTO textPosts (id, title, body) VALUES (?, ?, ?);";
 
   private static final String TEXT_POST_REQUEST_SQL_TEMPLATE = "SELECT id, title, body FROM textPosts WHERE id IN (%s);";
 
@@ -101,7 +114,15 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
 
   private final Connection connection;
 
+  private final PreparedStatement postInsertStatement;
+
   private final PreparedStatement postRequestStatement;
+
+  private final PreparedStatement postTagInsertStatement;
+
+  private final PreparedStatement tagInsertStatement;
+
+  private final PreparedStatement textPostInsertStatement;
 
   @VisibleForTesting
   SqlitePostDb(Connection connection) throws SQLException {
@@ -109,6 +130,10 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     initConnection();
 
     postRequestStatement = connection.prepareStatement(POST_REQUEST_SQL);
+    postInsertStatement = connection.prepareStatement(POST_INSERT_SQL);
+    postTagInsertStatement = connection.prepareStatement(POST_TAG_INSERT_SQL);
+    tagInsertStatement = connection.prepareStatement(TAG_INSERT_SQL);
+    textPostInsertStatement = connection.prepareStatement(TEXT_POST_INSERT_SQL);
   }
 
   public SqlitePostDb(String dbFile) throws ClassNotFoundException, SQLException {
@@ -118,6 +143,10 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
   @Override
   public void close() throws Exception {
     postRequestStatement.close();
+    postInsertStatement.close();
+    postTagInsertStatement.close();
+    tagInsertStatement.close();
+    textPostInsertStatement.close();
   }
 
   private Post doGet(long id) throws SQLException {
@@ -261,81 +290,144 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     }
   }
 
-  private void doPut(Post post) throws SQLException {
-    try (PreparedStatement postsInsertStatement = connection
-            .prepareStatement("INSERT OR REPLACE INTO posts (id, blogName, postUrl, postedTimestamp, retrievedTimestamp, postTypeId) SELECT ?, ?, ?, ?, ?, id FROM postTypes WHERE type = ?;");
-            PreparedStatement textPostsInsertStatement = connection
-                    .prepareStatement("INSERT OR REPLACE INTO textPosts (id, title, body) VALUES (?, ?, ?);");
-            PreparedStatement postTagsDeleteStatement = connection
-                    .prepareStatement("DELETE FROM postTags WHERE postId = ?;");
-            PreparedStatement tagsSelectStatement = connection
-                    .prepareStatement(buildTagSelectSql(post.getTags().size()));
-            PreparedStatement tagsInsertStatement = connection
-                    .prepareStatement("INSERT INTO tags (tag) VALUES (?);");
-            PreparedStatement postTagsInsertStatement = connection
-                    .prepareStatement("INSERT INTO postTags (postId, tagId, tagIndex) VALUES (?, ?, ?);")) {
-      TextPost textPost = (TextPost) post;
+  private void doPut(Collection<Post> posts) throws SQLException {
+    if (posts.isEmpty()) {
+      return;
+    }
 
-      // Update posts table.
-      postsInsertStatement.setLong(1, textPost.getId());
-      postsInsertStatement.setString(2, textPost.getBlogName());
-      postsInsertStatement.setString(3, textPost.getPostUrl());
-      postsInsertStatement.setLong(4, textPost.getPostedInstant().getMillis());
-      postsInsertStatement.setLong(5, textPost.getRetrievedInstant().getMillis());
-      postsInsertStatement.setString(6, textPost.getType().toString());
-      postsInsertStatement.execute();
+    Map<Long, Post> postById = new HashMap<>();
+    Map<Long, TextPost> textPostById = new HashMap<>();
 
-      // Update textPosts table.
-      textPostsInsertStatement.setLong(1, textPost.getId());
-      textPostsInsertStatement.setString(2, textPost.getTitle());
-      textPostsInsertStatement.setString(3, textPost.getBody());
-      textPostsInsertStatement.execute();
+    // Categorize post by type & update basic post information.
+    for (Post post : posts) {
+      postById.put(post.getId(), post);
 
-      // Remove old entries from postTags table.
-      postTagsDeleteStatement.setLong(1, textPost.getId());
-      postTagsDeleteStatement.execute();
+      switch (post.getType()) {
+      case ANSWER:
+        throw new NotImplementedException();
+      case AUDIO:
+        throw new NotImplementedException();
+      case CHAT:
+        throw new NotImplementedException();
+      case LINK:
+        throw new NotImplementedException();
+      case PHOTO:
+        throw new NotImplementedException();
+      case QUOTE:
+        throw new NotImplementedException();
+      case TEXT:
+        textPostById.put(post.getId(), (TextPost) post);
+        break;
+      case VIDEO:
+        throw new NotImplementedException();
+      default:
+        throw new AssertionError(String.format("Post %d has impossible type %s.", post.getId(),
+                post.getType().toString()));
+      }
 
-      if (!textPost.getTags().isEmpty()) {
-        // Look up existing tags.
-        int index = 1;
-        for (String tag : textPost.getTags()) {
-          tagsSelectStatement.setString(index++, tag);
-        }
-        Map<String, Integer> tagIdByTag = new HashMap<>();
-        try (ResultSet resultSet = tagsSelectStatement.executeQuery()) {
-          while (resultSet.next()) {
-            int id = resultSet.getInt("id");
-            String tag = resultSet.getString("tag");
+      postInsertStatement.setLong(1, post.getId());
+      postInsertStatement.setString(2, post.getBlogName());
+      postInsertStatement.setString(3, post.getPostUrl());
+      postInsertStatement.setLong(4, post.getPostedInstant().getMillis());
+      postInsertStatement.setLong(5, post.getRetrievedInstant().getMillis());
+      postInsertStatement.setString(6, post.getType().toString());
+      postInsertStatement.addBatch();
+    }
 
-            tagIdByTag.put(tag, id);
-          }
-        }
+    postInsertStatement.executeBatch();
 
-        // Create missing tags, if any.
-        for (String tag : textPost.getTags()) {
-          if (tagIdByTag.containsKey(tag)) {
-            continue;
-          }
+    // Update tag & post-type specific information.
+    doPutTagData(postById);
+    doPutTextPostData(textPostById);
+  }
 
-          tagsInsertStatement.setString(1, tag);
-          tagsInsertStatement.execute();
-          try (ResultSet resultSet = tagsInsertStatement.getGeneratedKeys()) {
-            int id = resultSet.getInt(1);
-            tagIdByTag.put(tag, id);
-          }
-        }
+  private void doPutTagData(Map<Long, Post> postById) throws SQLException {
+    if (postById.isEmpty()) {
+      return;
+    }
 
-        // Insert new entries into postTags table.
-        index = 0;
-        for (String tag : textPost.getTags()) {
-          postTagsInsertStatement.setLong(1, textPost.getId());
-          postTagsInsertStatement.setInt(2, tagIdByTag.get(tag));
-          postTagsInsertStatement.setInt(3, index++);
-          postTagsInsertStatement.addBatch();
-        }
-        postTagsInsertStatement.executeBatch();
+    // Delete existing postTags data.
+    String deletePostTagsSql = String.format(DELETE_POST_TAGS_SQL_TEMPLATE,
+            buildInQuery(postById.size()));
+    try (PreparedStatement deletePostTagsStatement = connection.prepareStatement(deletePostTagsSql)) {
+      int index = 1;
+      for (long id : postById.keySet()) {
+        deletePostTagsStatement.setLong(index++, id);
+      }
+      deletePostTagsStatement.execute();
+    }
+
+    // Find IDs for existing tags.
+    Map<String, Integer> idByTag = new HashMap<>();
+    for (Post post : postById.values()) {
+      for (String tag : post.getTags()) {
+        idByTag.put(tag, null);
       }
     }
+
+    if (idByTag.isEmpty()) {
+      return;
+    }
+
+    String tagRequestByNameSql = String.format(TAG_REQUEST_BY_NAME_SQL_TEMPLATE,
+            buildInQuery(idByTag.size()));
+    try (PreparedStatement tagRequestByNameStatement = connection
+            .prepareStatement(tagRequestByNameSql)) {
+      int index = 1;
+      for (String tag : idByTag.keySet()) {
+        tagRequestByNameStatement.setString(index++, tag);
+      }
+
+      try (ResultSet resultSet = tagRequestByNameStatement.executeQuery()) {
+        while (resultSet.next()) {
+          int id = resultSet.getInt("id");
+          String tag = resultSet.getString("tag");
+
+          idByTag.put(tag, id);
+        }
+      }
+    }
+
+    // Create missing tags, if any.
+    for (Map.Entry<String, Integer> entry : idByTag.entrySet()) {
+      if (entry.getValue() != null) {
+        continue;
+      }
+
+      String tag = entry.getKey();
+      tagInsertStatement.setString(1, tag);
+      tagInsertStatement.execute();
+      try (ResultSet resultSet = tagInsertStatement.getGeneratedKeys()) {
+        int id = resultSet.getInt(1);
+        entry.setValue(id);
+      }
+    }
+
+    // Update the postTags table.
+    for (Post post : postById.values()) {
+      int index = 0;
+      for (String tag : post.getTags()) {
+        postTagInsertStatement.setLong(1, post.getId());
+        postTagInsertStatement.setInt(2, idByTag.get(tag));
+        postTagInsertStatement.setInt(3, index++);
+        postTagInsertStatement.addBatch();
+      }
+    }
+    postTagInsertStatement.executeBatch();
+  }
+
+  private void doPutTextPostData(Map<Long, TextPost> postById) throws SQLException {
+    if (postById.isEmpty()) {
+      return;
+    }
+
+    for (TextPost post : postById.values()) {
+      textPostInsertStatement.setLong(1, post.getId());
+      textPostInsertStatement.setString(2, post.getTitle());
+      textPostInsertStatement.setString(3, post.getBody());
+      textPostInsertStatement.addBatch();
+    }
+    textPostInsertStatement.executeBatch();
   }
 
   @Override
@@ -456,7 +548,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
 
       @Override
       Void runTransaction() throws SQLException {
-        doPut(post);
+        doPut(ImmutableList.of(post));
         return null;
       }
     }.execute();
@@ -468,15 +560,6 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     while (--numItemsInSet > 0) {
       builder.append(", ?");
     }
-    return builder.toString();
-  }
-
-  private static String buildTagSelectSql(int numTags) {
-    StringBuilder builder = new StringBuilder("SELECT id, tag FROM tags WHERE tag IN (?");
-    while (--numTags > 0) {
-      builder.append(", ?");
-    }
-    builder.append(");");
     return builder.toString();
   }
 }
