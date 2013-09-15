@@ -1,13 +1,13 @@
 package cc.bran.tumblr.types;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 
 import org.joda.time.Instant;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.ImmutableList;
 
 /**
  * Represents a Tumblr post that may be persisted.
@@ -28,7 +28,7 @@ public abstract class Post {
 
     protected Instant retrievedInstant;
 
-    protected Set<String> tags;
+    protected List<String> tags;
 
     public abstract Post build();
 
@@ -52,8 +52,8 @@ public abstract class Post {
       this.retrievedInstant = retrievedInstant;
     }
 
-    public void setTags(Set<String> tags) {
-      this.tags = ImmutableSet.copyOf(tags);
+    public void setTags(Collection<String> tags) {
+      this.tags = ImmutableList.copyOf(tags);
     }
   }
 
@@ -67,7 +67,7 @@ public abstract class Post {
 
   private final Instant retrievedInstant;
 
-  private final Set<String> tags;
+  private final List<String> tags;
 
   public Post(long id, String blogName, String postUrl, Instant postedInstant,
           Instant retrievedInstant, Collection<String> tags) {
@@ -82,7 +82,7 @@ public abstract class Post {
     this.postUrl = postUrl;
     this.postedInstant = postedInstant;
     this.retrievedInstant = retrievedInstant;
-    this.tags = ImmutableSet.copyOf(tags);
+    this.tags = ImmutableList.copyOf(tags);
   }
 
   @Override
@@ -122,7 +122,7 @@ public abstract class Post {
     return retrievedInstant;
   }
 
-  public Set<String> getTags() {
+  public List<String> getTags() {
     return tags;
   }
 

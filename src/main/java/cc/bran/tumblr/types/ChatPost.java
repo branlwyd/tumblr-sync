@@ -34,7 +34,7 @@ public class ChatPost extends Post {
       this.body = body;
     }
 
-    public void setDialogue(List<Dialogue> dialogue) {
+    public void setDialogue(Collection<Dialogue> dialogue) {
       this.dialogue = ImmutableList.copyOf(dialogue);
     }
 

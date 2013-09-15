@@ -32,7 +32,7 @@ public class VideoPost extends Post {
       this.caption = caption;
     }
 
-    public void setPlayers(List<Video> players) {
+    public void setPlayers(Collection<Video> players) {
       this.players = ImmutableList.copyOf(players);
     }
   }
@@ -79,7 +79,8 @@ public class VideoPost extends Post {
   private final List<Video> players;
 
   public VideoPost(long id, String blogName, String postUrl, Instant postedInstant,
-          Instant retrievedInstant, Collection<String> tags, String caption, List<Video> players) {
+          Instant retrievedInstant, Collection<String> tags, String caption,
+          Collection<Video> players) {
     super(id, blogName, postUrl, postedInstant, retrievedInstant, tags);
     Preconditions.checkNotNull(caption);
     Preconditions.checkNotNull(players);

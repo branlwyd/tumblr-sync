@@ -40,7 +40,7 @@ public class PhotoPost extends Post {
       this.height = height;
     }
 
-    public void setPhotos(List<Photo> photos) {
+    public void setPhotos(Collection<Photo> photos) {
       this.photos = ImmutableList.copyOf(photos);
     }
 
@@ -100,7 +100,7 @@ public class PhotoPost extends Post {
 
     private final List<PhotoSize> photoSizes;
 
-    public Photo(String caption, List<PhotoSize> photoSizes) {
+    public Photo(String caption, Collection<PhotoSize> photoSizes) {
       Preconditions.checkNotNull(caption);
       Preconditions.checkNotNull(photoSizes);
 
@@ -141,7 +141,7 @@ public class PhotoPost extends Post {
   private final int width;
 
   public PhotoPost(long id, String blogName, String postUrl, Instant postedInstant,
-          Instant retrievedInstant, Collection<String> tags, List<Photo> photos, String caption,
+          Instant retrievedInstant, Collection<String> tags, Collection<Photo> photos, String caption,
           int width, int height) {
     super(id, blogName, postUrl, postedInstant, retrievedInstant, tags);
     Preconditions.checkNotNull(photos);

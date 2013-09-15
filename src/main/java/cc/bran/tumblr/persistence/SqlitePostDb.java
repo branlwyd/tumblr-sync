@@ -7,7 +7,11 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.joda.time.Instant;
@@ -98,7 +102,7 @@ public class SqlitePostDb implements PostDb {
     try (PreparedStatement postRequestStatement = connection
             .prepareStatement("SELECT posts.blogName, posts.postUrl, posts.postedTimestamp, posts.retrievedTimestamp, postTypes.type, textPosts.title, textPosts.body FROM posts JOIN textPosts ON posts.id = textPosts.id JOIN postTypes ON posts.postTypeId = postTypes.id WHERE posts.id = ?;");
             PreparedStatement tagsRequestStatement = connection
-                    .prepareStatement("SELECT tags.tag FROM postTags JOIN tags ON postTags.tagId = tags.id WHERE postTags.postId = ?;")) {
+                    .prepareStatement("SELECT tags.tag FROM postTags JOIN tags ON postTags.tagId = tags.id WHERE postTags.postId = ? ORDER BY postTags.tagIndex;")) {
       postRequestStatement.setLong(1, id);
       tagsRequestStatement.setLong(1, id);
 
@@ -106,7 +110,7 @@ public class SqlitePostDb implements PostDb {
       String postUrl;
       Instant postedInstant;
       Instant retrievedInstant;
-      Set<String> tags = new HashSet<String>();
+      List<String> tags = new ArrayList<String>();
       PostType type;
       String title;
       String body;
@@ -149,7 +153,7 @@ public class SqlitePostDb implements PostDb {
             PreparedStatement tagsInsertStatement = connection
                     .prepareStatement("INSERT INTO tags (tag) VALUES (?);");
             PreparedStatement postTagsInsertStatement = connection
-                    .prepareStatement("INSERT INTO postTags (postId, tagId) VALUES (?, ?);")) {
+                    .prepareStatement("INSERT INTO postTags (postId, tagId, tagIndex) VALUES (?, ?, ?);")) {
       TextPost textPost = (TextPost) post;
 
       // Update posts table.
@@ -177,36 +181,39 @@ public class SqlitePostDb implements PostDb {
         for (String tag : textPost.getTags()) {
           tagsSelectStatement.setString(index++, tag);
         }
-        Set<Integer> tagIds = new HashSet<>();
-        Set<String> missingTags = new HashSet<>(textPost.getTags());
+        Map<String, Integer> tagIdByTag = new HashMap<>();
         try (ResultSet resultSet = tagsSelectStatement.executeQuery()) {
           while (resultSet.next()) {
-            tagIds.add(resultSet.getInt("id"));
-            missingTags.remove(resultSet.getString("tag"));
+            int id = resultSet.getInt("id");
+            String tag = resultSet.getString("tag");
+            
+            tagIdByTag.put(tag, id);
           }
         }
 
         // Create missing tags, if any.
-        if (!missingTags.isEmpty()) {
-          for (String tag : missingTags) {
-            tagsInsertStatement.setString(1, tag);
-            tagsInsertStatement.execute();
-            try (ResultSet resultSet = tagsInsertStatement.getGeneratedKeys()) {
-              tagIds.add(resultSet.getInt(1));
-            }
+        for (String tag : textPost.getTags()) {
+          if (tagIdByTag.containsKey(tag)) {
+            continue;
+          }
+          
+          tagsInsertStatement.setString(1, tag);
+          tagsInsertStatement.execute();
+          try (ResultSet resultSet = tagsInsertStatement.getGeneratedKeys()) {
+            int id = resultSet.getInt(1);
+            tagIdByTag.put(tag, id);
           }
         }
 
         // Insert new entries into postTags table.
-        if (!tagIds.isEmpty()) {
-          for (Integer tagId : tagIds) {
-            postTagsInsertStatement.setLong(1, textPost.getId());
-            postTagsInsertStatement.setInt(2, tagId);
-            postTagsInsertStatement.addBatch();
-          }
-
-          postTagsInsertStatement.executeBatch();
-        }
+        index = 0;
+        for (String tag : textPost.getTags()) {
+          postTagsInsertStatement.setLong(1, textPost.getId());
+          postTagsInsertStatement.setInt(2, tagIdByTag.get(tag));
+          postTagsInsertStatement.setInt(3, index++);
+          postTagsInsertStatement.addBatch();
+        }        
+        postTagsInsertStatement.executeBatch();
       }
     }
   }
@@ -256,7 +263,7 @@ public class SqlitePostDb implements PostDb {
           statement
                   .execute("CREATE TABLE IF NOT EXISTS tags(id INTEGER PRIMARY KEY AUTOINCREMENT, tag TEXT UNIQUE NOT NULL);");
           statement
-                  .execute("CREATE TABLE IF NOT EXISTS postTags(postId INTEGER NOT NULL REFERENCES posts(id), tagId INTEGER NOT NULL REFERENCES tags(id), PRIMARY KEY(postId, tagId));");
+                  .execute("CREATE TABLE IF NOT EXISTS postTags(postId INTEGER NOT NULL REFERENCES posts(id), tagId INTEGER NOT NULL REFERENCES tags(id), tagIndex INTEGER NOT NULL, PRIMARY KEY(postId, tagId));");
 
           // Photo post-specific tables.
           statement
