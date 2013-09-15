@@ -35,7 +35,6 @@ import com.google.common.collect.ImmutableList;
  * 
  * @author Brandon Pitman (brandon.pitman@gmail.com)
  */
-// TODO(bpitman): don't re-prepare statements with every call to get()/post()/etc
 public class SqlitePostDb implements PostDb, AutoCloseable {
 
   /**
@@ -90,7 +89,13 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
 
   private static final String ANSWER_POSTS_REQUEST_SQL_TEMPLATE = "SELECT id, askingName, askingUrl, question, answer FROM answerPosts WHERE id IN (%s);";
 
-  private static final String DELETE_ANSWER_POSTS_SQL_TEMPLATE = "DELETE FROM answerPosts WHERE id IN (%s)";
+  private static final String AUDIO_POST_INSERT_SQL = "INSERT INTO audioPosts (id, album, albumArt, artist, caption, player, plays, trackName, trackNumber, year) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
+
+  private static final String AUDIO_POSTS_REQUEST_SQL_TEMPLATE = "SELECT id, album, albumArt, artist, caption, player, plays, trackName, trackNumber, year FROM audioPosts WHERE id IN (%s);";
+
+  private static final String DELETE_ANSWER_POSTS_SQL_TEMPLATE = "DELETE FROM answerPosts WHERE id IN (%s);";
+
+  private static final String DELETE_AUDIO_POSTS_SQL_TEMPLATE = "DELETE FROM audioPosts WHERE id IN (%s);";
 
   private static final String DELETE_POST_TAGS_SQL_TEMPLATE = "DELETE FROM postTags WHERE postId IN (%s);";
 
@@ -124,6 +129,8 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
 
   private final PreparedStatement answerPostInsertStatement;
 
+  private final PreparedStatement audioPostInsertStatement;
+
   private final Connection connection;
 
   private final PreparedStatement postInsertStatement;
@@ -142,6 +149,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     initConnection();
 
     answerPostInsertStatement = connection.prepareStatement(ANSWER_POST_INSERT_SQL);
+    audioPostInsertStatement = connection.prepareStatement(AUDIO_POST_INSERT_SQL);
     postRequestStatement = connection.prepareStatement(POST_REQUEST_SQL);
     postInsertStatement = connection.prepareStatement(POST_INSERT_SQL);
     postTagInsertStatement = connection.prepareStatement(POST_TAG_INSERT_SQL);
@@ -156,6 +164,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
   @Override
   public void close() throws SQLException {
     answerPostInsertStatement.close();
+    audioPostInsertStatement.close();
     postRequestStatement.close();
     postInsertStatement.close();
     postTagInsertStatement.close();
@@ -186,6 +195,18 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
         deleteAnswerPostsStatement.setLong(index++, id);
       }
       deleteAnswerPostsStatement.execute();
+    }
+
+    // Delete audio post-related data.
+    String deleteAudioPostsSql = String.format(DELETE_AUDIO_POSTS_SQL_TEMPLATE,
+            buildInQuery(ids.size()));
+    try (PreparedStatement deleteAudioPostsStatement = connection
+            .prepareStatement(deleteAudioPostsSql)) {
+      int index = 1;
+      for (long id : ids) {
+        deleteAudioPostsStatement.setLong(index++, id);
+      }
+      deleteAudioPostsStatement.execute();
     }
 
     // Delete text post-related data.
@@ -240,16 +261,16 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
       return;
     }
 
-    String answerPostRequestSql = String.format(ANSWER_POSTS_REQUEST_SQL_TEMPLATE,
+    String answerPostsRequestSql = String.format(ANSWER_POSTS_REQUEST_SQL_TEMPLATE,
             buildInQuery(builderById.size()));
-    try (PreparedStatement answerPostRequestStatement = connection
-            .prepareStatement(answerPostRequestSql)) {
+    try (PreparedStatement answerPostsRequestStatement = connection
+            .prepareStatement(answerPostsRequestSql)) {
       int index = 1;
       for (long id : builderById.keySet()) {
-        answerPostRequestStatement.setLong(index++, id);
+        answerPostsRequestStatement.setLong(index++, id);
       }
 
-      try (ResultSet resultSet = answerPostRequestStatement.executeQuery()) {
+      try (ResultSet resultSet = answerPostsRequestStatement.executeQuery()) {
         while (resultSet.next()) {
           AnswerPost.Builder postBuilder = builderById.get(resultSet.getLong("id"));
           postBuilder.setAskingName(resultSet.getString("askingName"));
@@ -261,9 +282,41 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     }
   }
 
+  private void doGetAudioPostData(Map<Long, AudioPost.Builder> builderById) throws SQLException {
+    if (builderById.isEmpty()) {
+      return;
+    }
+
+    String audioPostsRequestSql = String.format(AUDIO_POSTS_REQUEST_SQL_TEMPLATE,
+            buildInQuery(builderById.size()));
+    try (PreparedStatement audioPostsRequestStatement = connection
+            .prepareStatement(audioPostsRequestSql)) {
+      int index = 1;
+      for (long id : builderById.keySet()) {
+        audioPostsRequestStatement.setLong(index++, id);
+      }
+
+      try (ResultSet resultSet = audioPostsRequestStatement.executeQuery()) {
+        while (resultSet.next()) {
+          AudioPost.Builder postBuilder = builderById.get(resultSet.getLong("id"));
+          postBuilder.setAlbum(resultSet.getString("album"));
+          postBuilder.setAlbumArt(resultSet.getString("albumArt"));
+          postBuilder.setArtist(resultSet.getString("artist"));
+          postBuilder.setCaption(resultSet.getString("caption"));
+          postBuilder.setPlayer(resultSet.getString("player"));
+          postBuilder.setPlays(resultSet.getInt("plays"));
+          postBuilder.setTrackName(resultSet.getString("trackName"));
+          postBuilder.setTrackNumber(resultSet.getInt("trackNumber"));
+          postBuilder.setYear(resultSet.getInt("year"));
+        }
+      }
+    }
+  }
+
   private List<Post> doGetFromResultSet(ResultSet resultSet) throws SQLException {
     Map<Long, Post.Builder> builderById = new HashMap<>();
     Map<Long, AnswerPost.Builder> answerBuilderById = new HashMap<>();
+    Map<Long, AudioPost.Builder> audioBuilderById = new HashMap<>();
     Map<Long, TextPost.Builder> textBuilderById = new HashMap<>();
 
     // Extract basic data from results & categorize them by type.
@@ -279,7 +332,8 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
         break;
       case AUDIO:
         postBuilder = new AudioPost.Builder();
-        throw new NotImplementedException();
+        audioBuilderById.put(id, (AudioPost.Builder) postBuilder);
+        break;
       case CHAT:
         postBuilder = new ChatPost.Builder();
         throw new NotImplementedException();
@@ -317,6 +371,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     // Set tag data & post type-specific data.
     doGetTagData(builderById);
     doGetAnswerPostData(answerBuilderById);
+    doGetAudioPostData(audioBuilderById);
     doGetTextPostData(textBuilderById);
 
     // Build result.
@@ -399,6 +454,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     // Categorize post by type & update basic post information.
     Map<Long, Post> postById = new HashMap<>();
     Map<Long, AnswerPost> answerPostById = new HashMap<>();
+    Map<Long, AudioPost> audioPostById = new HashMap<>();
     Map<Long, TextPost> textPostById = new HashMap<>();
 
     for (Post post : posts) {
@@ -409,7 +465,8 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
         answerPostById.put(post.getId(), (AnswerPost) post);
         break;
       case AUDIO:
-        throw new NotImplementedException();
+        audioPostById.put(post.getId(), (AudioPost) post);
+        break;
       case CHAT:
         throw new NotImplementedException();
       case LINK:
@@ -446,6 +503,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
 
     // Update tag & post-type specific information.
     doPutTagData(postById);
+    doPutAudioPostData(audioPostById);
     doPutAnswerPostData(answerPostById);
     doPutTextPostData(textPostById);
   }
@@ -464,6 +522,27 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
       answerPostInsertStatement.addBatch();
     }
     answerPostInsertStatement.executeBatch();
+  }
+
+  private void doPutAudioPostData(Map<Long, AudioPost> postById) throws SQLException {
+    if (postById.isEmpty()) {
+      return;
+    }
+
+    for (AudioPost post : postById.values()) {
+      audioPostInsertStatement.setLong(1, post.getId());
+      audioPostInsertStatement.setString(2, post.getAlbum());
+      audioPostInsertStatement.setString(3, post.getAlbumArt());
+      audioPostInsertStatement.setString(4, post.getArtist());
+      audioPostInsertStatement.setString(5, post.getCaption());
+      audioPostInsertStatement.setString(6, post.getPlayer());
+      audioPostInsertStatement.setInt(7, post.getPlays());
+      audioPostInsertStatement.setString(8, post.getTrackName());
+      audioPostInsertStatement.setInt(9, post.getTrackNumber());
+      audioPostInsertStatement.setInt(10, post.getYear());
+      audioPostInsertStatement.addBatch();
+    }
+    audioPostInsertStatement.executeBatch();
   }
 
   private void doPutTagData(Map<Long, Post> postById) throws SQLException {

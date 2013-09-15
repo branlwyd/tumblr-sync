@@ -12,6 +12,7 @@ import org.joda.time.Duration;
 import org.joda.time.Instant;
 
 import cc.bran.tumblr.types.AnswerPost;
+import cc.bran.tumblr.types.AudioPost;
 import cc.bran.tumblr.types.Post;
 import cc.bran.tumblr.types.TextPost;
 
@@ -33,6 +34,16 @@ public class SqlitePostDbTest extends TestCase {
           "http://foo.tumblr.com/posts/566/whee", Instant.now().minus(Duration.millis(5100)),
           Instant.now().minus(Duration.millis(2200)), ImmutableList.of("tag1", "tag4"), "fool",
           "http://fool.tumblr.com/", "War, huh, what is it good for?", "Oil, lol.");
+
+  private static final Post AUDIO_POST_1 = new AudioPost(414, "foo.tumblr.com",
+          "http://foo.tumblr.com/414/whee", Instant.now().minus(Duration.millis(5200)),
+          Instant.now(), ImmutableList.of("tag2", "tag5"), "a song", "player", 52, "album art",
+          "fartist", "fartistry", "a track name", 2, 1993);
+
+  private static final Post AUDIO_POST_1_EDITED = new AudioPost(414, "foo.tumblr.com",
+          "http://foo.tumblr.com/414/whee", Instant.now().minus(Duration.millis(5200)),
+          Instant.now(), ImmutableList.of("tag4", "tag5"), "edited song", "player", 52,
+          "album art", "artist formerly known as fartist", "fartistry x 2", "a track name", 2, 1993);
 
   private static final Post TEXT_POST_1 = new TextPost(513, "foo.tumblr.com",
           "http://foo.tumblr.com/posts/513/whee", Instant.now().minus(Duration.millis(5000)),
@@ -106,6 +117,10 @@ public class SqlitePostDbTest extends TestCase {
     assertCanDelete(ANSWER_POST_1);
   }
 
+  public void testDelete_audioPost() throws SQLException {
+    assertCanDelete(AUDIO_POST_1);
+  }
+
   public void testDelete_textPost() throws SQLException {
     assertCanDelete(TEXT_POST_1);
   }
@@ -114,12 +129,20 @@ public class SqlitePostDbTest extends TestCase {
     assertCanEdit(ANSWER_POST_1, ANSWER_POST_1_EDITED);
   }
 
+  public void testEdit_audioPost() throws SQLException {
+    assertCanEdit(AUDIO_POST_1, AUDIO_POST_1_EDITED);
+  }
+
   public void testEdit_textPost() throws SQLException {
     assertCanEdit(TEXT_POST_1, TEXT_POST_1_EDITED);
   }
 
   public void testGet_answerPost() throws SQLException {
     assertCanGet(ANSWER_POST_1);
+  }
+
+  public void testGet_audioPost() throws SQLException {
+    assertCanGet(AUDIO_POST_1);
   }
 
   public void testGet_nonexistent() throws SQLException {
@@ -132,6 +155,10 @@ public class SqlitePostDbTest extends TestCase {
 
   public void testPut_answerPost() throws SQLException {
     assertCanPut(ANSWER_POST_1);
+  }
+
+  public void testPut_audioPost() throws SQLException {
+    assertCanPut(AUDIO_POST_1);
   }
 
   public void testPut_textPost() throws SQLException {
