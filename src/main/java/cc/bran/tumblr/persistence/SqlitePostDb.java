@@ -86,6 +86,12 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     abstract E runTransaction() throws Ex;
   }
 
+  private static final String ANSWER_POST_INSERT_SQL = "INSERT INTO answerPosts (id, askingName, askingUrl, question, answer) VALUES (?, ?, ?, ?, ?);";
+
+  private static final String ANSWER_POSTS_REQUEST_SQL_TEMPLATE = "SELECT id, askingName, askingUrl, question, answer FROM answerPosts WHERE id IN (%s);";
+
+  private static final String DELETE_ANSWER_POSTS_SQL_TEMPLATE = "DELETE FROM answerPosts WHERE id IN (%s)";
+
   private static final String DELETE_POST_TAGS_SQL_TEMPLATE = "DELETE FROM postTags WHERE postId IN (%s);";
 
   private static final String DELETE_POSTS_SQL_TEMPLATE = "DELETE FROM posts WHERE id IN (%s)";
@@ -116,6 +122,8 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     }
   }
 
+  private final PreparedStatement answerPostInsertStatement;
+
   private final Connection connection;
 
   private final PreparedStatement postInsertStatement;
@@ -133,6 +141,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     this.connection = connection;
     initConnection();
 
+    answerPostInsertStatement = connection.prepareStatement(ANSWER_POST_INSERT_SQL);
     postRequestStatement = connection.prepareStatement(POST_REQUEST_SQL);
     postInsertStatement = connection.prepareStatement(POST_INSERT_SQL);
     postTagInsertStatement = connection.prepareStatement(POST_TAG_INSERT_SQL);
@@ -145,7 +154,8 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
   }
 
   @Override
-  public void close() throws Exception {
+  public void close() throws SQLException {
+    answerPostInsertStatement.close();
     postRequestStatement.close();
     postInsertStatement.close();
     postTagInsertStatement.close();
@@ -154,7 +164,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
   }
 
   @Override
-  public void delete(final long id) throws Exception {
+  public void delete(final long id) throws SQLException {
     new Transaction<Void, SQLException>() {
 
       @Override
@@ -166,6 +176,18 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
   }
 
   public void doDelete(Collection<Long> ids) throws SQLException {
+    // Delete answer post-related data.
+    String deleteAnswerPostsSql = String.format(DELETE_ANSWER_POSTS_SQL_TEMPLATE,
+            buildInQuery(ids.size()));
+    try (PreparedStatement deleteAnswerPostsStatement = connection
+            .prepareStatement(deleteAnswerPostsSql)) {
+      int index = 1;
+      for (long id : ids) {
+        deleteAnswerPostsStatement.setLong(index++, id);
+      }
+      deleteAnswerPostsStatement.execute();
+    }
+
     // Delete text post-related data.
     String deleteTextPostsSql = String.format(DELETE_TEXT_POSTS_SQL_TEMPLATE,
             buildInQuery(ids.size()));
@@ -213,8 +235,35 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     }
   }
 
+  private void doGetAnswerPostData(Map<Long, AnswerPost.Builder> builderById) throws SQLException {
+    if (builderById.isEmpty()) {
+      return;
+    }
+
+    String answerPostRequestSql = String.format(ANSWER_POSTS_REQUEST_SQL_TEMPLATE,
+            buildInQuery(builderById.size()));
+    try (PreparedStatement answerPostRequestStatement = connection
+            .prepareStatement(answerPostRequestSql)) {
+      int index = 1;
+      for (long id : builderById.keySet()) {
+        answerPostRequestStatement.setLong(index++, id);
+      }
+
+      try (ResultSet resultSet = answerPostRequestStatement.executeQuery()) {
+        while (resultSet.next()) {
+          AnswerPost.Builder postBuilder = builderById.get(resultSet.getLong("id"));
+          postBuilder.setAskingName(resultSet.getString("askingName"));
+          postBuilder.setAskingUrl(resultSet.getString("askingUrl"));
+          postBuilder.setQuestion(resultSet.getString("question"));
+          postBuilder.setAnswer(resultSet.getString("answer"));
+        }
+      }
+    }
+  }
+
   private List<Post> doGetFromResultSet(ResultSet resultSet) throws SQLException {
     Map<Long, Post.Builder> builderById = new HashMap<>();
+    Map<Long, AnswerPost.Builder> answerBuilderById = new HashMap<>();
     Map<Long, TextPost.Builder> textBuilderById = new HashMap<>();
 
     // Extract basic data from results & categorize them by type.
@@ -226,7 +275,8 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
       switch (postType) {
       case ANSWER:
         postBuilder = new AnswerPost.Builder();
-        throw new NotImplementedException();
+        answerBuilderById.put(id, (AnswerPost.Builder) postBuilder);
+        break;
       case AUDIO:
         postBuilder = new AudioPost.Builder();
         throw new NotImplementedException();
@@ -266,6 +316,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
 
     // Set tag data & post type-specific data.
     doGetTagData(builderById);
+    doGetAnswerPostData(answerBuilderById);
     doGetTextPostData(textBuilderById);
 
     // Build result.
@@ -332,8 +383,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
 
       try (ResultSet resultSet = textPostRequestStatement.executeQuery()) {
         while (resultSet.next()) {
-          long id = resultSet.getLong("id");
-          TextPost.Builder builder = builderById.get(id);
+          TextPost.Builder builder = builderById.get(resultSet.getLong("id"));
           builder.setTitle(resultSet.getString("title"));
           builder.setBody(resultSet.getString("body"));
         }
@@ -348,13 +398,16 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
 
     // Categorize post by type & update basic post information.
     Map<Long, Post> postById = new HashMap<>();
+    Map<Long, AnswerPost> answerPostById = new HashMap<>();
     Map<Long, TextPost> textPostById = new HashMap<>();
+
     for (Post post : posts) {
       postById.put(post.getId(), post);
 
       switch (post.getType()) {
       case ANSWER:
-        throw new NotImplementedException();
+        answerPostById.put(post.getId(), (AnswerPost) post);
+        break;
       case AUDIO:
         throw new NotImplementedException();
       case CHAT:
@@ -393,7 +446,24 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
 
     // Update tag & post-type specific information.
     doPutTagData(postById);
+    doPutAnswerPostData(answerPostById);
     doPutTextPostData(textPostById);
+  }
+
+  private void doPutAnswerPostData(Map<Long, AnswerPost> postById) throws SQLException {
+    if (postById.isEmpty()) {
+      return;
+    }
+
+    for (AnswerPost post : postById.values()) {
+      answerPostInsertStatement.setLong(1, post.getId());
+      answerPostInsertStatement.setString(2, post.getAskingName());
+      answerPostInsertStatement.setString(3, post.getAskingUrl());
+      answerPostInsertStatement.setString(4, post.getQuestion());
+      answerPostInsertStatement.setString(5, post.getAnswer());
+      answerPostInsertStatement.addBatch();
+    }
+    answerPostInsertStatement.executeBatch();
   }
 
   private void doPutTagData(Map<Long, Post> postById) throws SQLException {
