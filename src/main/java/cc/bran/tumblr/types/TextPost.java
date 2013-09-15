@@ -14,6 +14,26 @@ import com.google.common.base.Preconditions;
  */
 public class TextPost extends Post {
 
+  public static class Builder extends Post.Builder {
+
+    private String body;
+
+    private String title;
+
+    @Override
+    public TextPost build() {
+      return new TextPost(id, blogName, postUrl, postedInstant, retrievedInstant, tags, title, body);
+    }
+
+    public void setBody(String body) {
+      this.body = body;
+    }
+
+    public void setTitle(String title) {
+      this.title = title;
+    }
+  }
+
   private final String body;
 
   private final String title;

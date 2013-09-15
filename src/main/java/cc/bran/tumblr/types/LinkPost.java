@@ -14,6 +14,33 @@ import com.google.common.base.Preconditions;
  */
 public class LinkPost extends Post {
 
+  public static class Builder extends Post.Builder {
+
+    private String description;
+
+    private String title;
+
+    private String url;
+
+    @Override
+    public LinkPost build() {
+      return new LinkPost(id, blogName, postUrl, postedInstant, retrievedInstant, tags, title, url,
+              description);
+    }
+
+    public void setDescription(String description) {
+      this.description = description;
+    }
+
+    public void setTitle(String title) {
+      this.title = title;
+    }
+
+    public void setUrl(String url) {
+      this.url = url;
+    }
+  }
+
   private final String description;
 
   private final String title;

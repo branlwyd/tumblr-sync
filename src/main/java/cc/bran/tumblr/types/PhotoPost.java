@@ -16,6 +16,39 @@ import com.google.common.collect.ImmutableList;
  */
 public class PhotoPost extends Post {
 
+  public static class Builder extends Post.Builder {
+
+    private String caption;
+
+    private int height;
+
+    private List<Photo> photos;
+
+    private int width;
+
+    @Override
+    public PhotoPost build() {
+      return new PhotoPost(id, blogName, postUrl, postedInstant, retrievedInstant, tags, photos,
+              caption, width, height);
+    }
+
+    public void setCaption(String caption) {
+      this.caption = caption;
+    }
+
+    public void setHeight(int height) {
+      this.height = height;
+    }
+
+    public void setPhotos(List<Photo> photos) {
+      this.photos = ImmutableList.copyOf(photos);
+    }
+
+    public void setWidth(int width) {
+      this.width = width;
+    }
+  }
+
   public static class Photo {
 
     public static class PhotoSize {

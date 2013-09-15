@@ -14,6 +14,27 @@ import com.google.common.base.Preconditions;
  */
 public class QuotePost extends Post {
 
+  public static class Builder extends Post.Builder {
+
+    private String source;
+
+    private String text;
+
+    @Override
+    public QuotePost build() {
+      return new QuotePost(id, blogName, postUrl, postedInstant, retrievedInstant, tags, text,
+              source);
+    }
+
+    public void setSource(String source) {
+      this.source = source;
+    }
+
+    public void setText(String text) {
+      this.text = text;
+    }
+  }
+
   private final String source;
 
   private final String text;

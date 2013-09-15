@@ -16,6 +16,47 @@ import com.google.common.collect.ImmutableSet;
  */
 public abstract class Post {
 
+  public static abstract class Builder {
+
+    protected String blogName;
+
+    protected long id;
+
+    protected Instant postedInstant;
+
+    protected String postUrl;
+
+    protected Instant retrievedInstant;
+
+    protected Set<String> tags;
+
+    public abstract Post build();
+
+    public void setBlogName(String blogName) {
+      this.blogName = blogName;
+    }
+
+    public void setId(long id) {
+      this.id = id;
+    }
+
+    public void setPostedInstant(Instant postedInstant) {
+      this.postedInstant = postedInstant;
+    }
+
+    public void setPostUrl(String postUrl) {
+      this.postUrl = postUrl;
+    }
+
+    public void setRetrievedInstant(Instant retrievedInstant) {
+      this.retrievedInstant = retrievedInstant;
+    }
+
+    public void setTags(Set<String> tags) {
+      this.tags = ImmutableSet.copyOf(tags);
+    }
+  }
+
   private final String blogName;
 
   private final long id;

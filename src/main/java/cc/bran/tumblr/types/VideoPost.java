@@ -16,6 +16,27 @@ import com.google.common.collect.ImmutableList;
  */
 public class VideoPost extends Post {
 
+  public static class Builder extends Post.Builder {
+
+    private String caption;
+
+    private List<Video> players;
+
+    @Override
+    public VideoPost build() {
+      return new VideoPost(id, blogName, postUrl, postedInstant, retrievedInstant, tags, caption,
+              players);
+    }
+
+    public void setCaption(String caption) {
+      this.caption = caption;
+    }
+
+    public void setPlayers(List<Video> players) {
+      this.players = ImmutableList.copyOf(players);
+    }
+  }
+
   public static class Video {
 
     private final String embedCode;

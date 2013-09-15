@@ -14,6 +14,69 @@ import com.google.common.base.Preconditions;
  */
 public class AudioPost extends Post {
 
+  public static class Builder extends Post.Builder {
+
+    private String album;
+
+    private String albumArt;
+
+    private String artist;
+
+    private String caption;
+
+    private String player;
+
+    private int plays;
+
+    private String trackName;
+
+    private int trackNumber;
+
+    private int year;
+
+    @Override
+    public AudioPost build() {
+      return new AudioPost(id, blogName, postUrl, postedInstant, retrievedInstant, tags, caption,
+              player, plays, albumArt, artist, album, trackName, trackNumber, year);
+    }
+
+    public void setAlbum(String album) {
+      this.album = album;
+    }
+
+    public void setAlbumArt(String albumArt) {
+      this.albumArt = albumArt;
+    }
+
+    public void setArtist(String artist) {
+      this.artist = artist;
+    }
+
+    public void setCaption(String caption) {
+      this.caption = caption;
+    }
+
+    public void setPlayer(String player) {
+      this.player = player;
+    }
+
+    public void setPlays(int plays) {
+      this.plays = plays;
+    }
+
+    public void setTrackName(String trackName) {
+      this.trackName = trackName;
+    }
+
+    public void setTrackNumber(int trackNumber) {
+      this.trackNumber = trackNumber;
+    }
+
+    public void setYear(int year) {
+      this.year = year;
+    }
+  }
+
   private final String album;
 
   private final String albumArt;

@@ -14,6 +14,39 @@ import com.google.common.base.Preconditions;
  */
 public class AnswerPost extends Post {
 
+  public static class Builder extends Post.Builder {
+
+    private String answer;
+
+    private String askingName;
+
+    private String askingUrl;
+
+    private String question;
+
+    @Override
+    public AnswerPost build() {
+      return new AnswerPost(id, blogName, postUrl, postedInstant, retrievedInstant, tags,
+              askingName, askingUrl, question, answer);
+    }
+
+    public void setAnswer(String answer) {
+      this.answer = answer;
+    }
+
+    public void setAskingName(String askingName) {
+      this.askingName = askingName;
+    }
+
+    public void setAskingUrl(String askingUrl) {
+      this.askingUrl = askingUrl;
+    }
+
+    public void setQuestion(String question) {
+      this.question = question;
+    }
+  }
+
   private final String answer;
 
   private final String askingName;
