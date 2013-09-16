@@ -15,6 +15,7 @@ import cc.bran.tumblr.types.AnswerPost;
 import cc.bran.tumblr.types.AudioPost;
 import cc.bran.tumblr.types.ChatPost;
 import cc.bran.tumblr.types.ChatPost.Dialogue;
+import cc.bran.tumblr.types.LinkPost;
 import cc.bran.tumblr.types.Post;
 import cc.bran.tumblr.types.TextPost;
 
@@ -58,6 +59,14 @@ public class SqlitePostDbTest extends TestCase {
           Instant.now(), ImmutableList.of("tag2", "tag5"), "chat title", "chat body",
           ImmutableList.of(new Dialogue("person 1", "first", "hello"), new Dialogue("person 2",
                   "second", "hi"), new Dialogue("person 1", "third", "how are you?")));
+
+  private static final Post LINK_POST_1 = new LinkPost(4003, "foo.tumblr.com",
+          "http://foo.tumblr.com/4003/whee", Instant.now(), Instant.now(), ImmutableList.of("tag5",
+                  "tag6"), "title", "url", "description");
+
+  private static final Post LINK_POST_1_EDITED = new LinkPost(4003, "foo.tumblr.com",
+          "http://foo.tumblr.com/4003/whee", Instant.now(), Instant.now(), ImmutableList.of("tag5",
+                  "tag6"), "new-title", "new-url", "new-description");
 
   private static final Post TEXT_POST_1 = new TextPost(513, "foo.tumblr.com",
           "http://foo.tumblr.com/posts/513/whee", Instant.now().minus(Duration.millis(5000)),
@@ -143,6 +152,10 @@ public class SqlitePostDbTest extends TestCase {
     assertCanDelete(CHAT_POST_1);
   }
 
+  public void testDelete_linkPost() throws SQLException {
+    assertCanDelete(LINK_POST_1);
+  }
+
   public void testDelete_textPost() throws SQLException {
     assertCanDelete(TEXT_POST_1);
   }
@@ -159,6 +172,10 @@ public class SqlitePostDbTest extends TestCase {
     assertCanEdit(CHAT_POST_1, CHAT_POST_1_EDITED);
   }
 
+  public void testEdit_linkPost() throws SQLException {
+    assertCanEdit(LINK_POST_1, LINK_POST_1_EDITED);
+  }
+
   public void testEdit_textPost() throws SQLException {
     assertCanEdit(TEXT_POST_1, TEXT_POST_1_EDITED);
   }
@@ -173,6 +190,10 @@ public class SqlitePostDbTest extends TestCase {
 
   public void testGet_chatPost() throws SQLException {
     assertCanGet(CHAT_POST_1);
+  }
+
+  public void testGet_linkPost() throws SQLException {
+    assertCanGet(LINK_POST_1);
   }
 
   public void testGet_nonexistent() throws SQLException {
@@ -193,6 +214,10 @@ public class SqlitePostDbTest extends TestCase {
 
   public void testPut_chatPost() throws SQLException {
     assertCanPut(CHAT_POST_1);
+  }
+
+  public void testPut_linkPost() throws SQLException {
+    assertCanPut(LINK_POST_1);
   }
 
   public void testPut_textPost() throws SQLException {
