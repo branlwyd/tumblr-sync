@@ -98,7 +98,7 @@ public class ChatPost extends Post {
 
   public ChatPost(long id, String blogName, String postUrl, Instant postedInstant,
           Instant retrievedInstant, Collection<String> tags, String title, String body,
-          List<Dialogue> dialogue) {
+          Collection<Dialogue> dialogue) {
     super(id, blogName, postUrl, postedInstant, retrievedInstant, tags);
     Preconditions.checkNotNull(title);
     Preconditions.checkNotNull(body);

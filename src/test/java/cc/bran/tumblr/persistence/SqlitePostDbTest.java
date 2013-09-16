@@ -13,6 +13,8 @@ import org.joda.time.Instant;
 
 import cc.bran.tumblr.types.AnswerPost;
 import cc.bran.tumblr.types.AudioPost;
+import cc.bran.tumblr.types.ChatPost;
+import cc.bran.tumblr.types.ChatPost.Dialogue;
 import cc.bran.tumblr.types.Post;
 import cc.bran.tumblr.types.TextPost;
 
@@ -45,6 +47,18 @@ public class SqlitePostDbTest extends TestCase {
           Instant.now(), ImmutableList.of("tag4", "tag5"), "edited song", "player", 52,
           "album art", "artist formerly known as fartist", "fartistry x 2", "a track name", 2, 1993);
 
+  private static final Post CHAT_POST_1 = new ChatPost(123, "foo.tumblr.com",
+          "http://foo.tumblr.com/123/whee", Instant.now().minus(Duration.millis(1234)),
+          Instant.now(), ImmutableList.of("tag2", "tag5"), "chat title", "chat body",
+          ImmutableList.of(new Dialogue("person 1", "first", "hello"), new Dialogue("person 2",
+                  "second", "hi")));
+
+  private static final Post CHAT_POST_1_EDITED = new ChatPost(123, "foo.tumblr.com",
+          "http://foo.tumblr.com/123/whee", Instant.now().minus(Duration.millis(1234)),
+          Instant.now(), ImmutableList.of("tag2", "tag5"), "chat title", "chat body",
+          ImmutableList.of(new Dialogue("person 1", "first", "hello"), new Dialogue("person 2",
+                  "second", "hi"), new Dialogue("person 1", "third", "how are you?")));
+
   private static final Post TEXT_POST_1 = new TextPost(513, "foo.tumblr.com",
           "http://foo.tumblr.com/posts/513/whee", Instant.now().minus(Duration.millis(5000)),
           Instant.now(), ImmutableList.of("tag1", "tag2", "tag3"), "test post",
@@ -61,6 +75,10 @@ public class SqlitePostDbTest extends TestCase {
     } catch (ClassNotFoundException exception) {
       throw new AssertionError("org.sqlite.JDBC must be available", exception);
     }
+  }
+
+  public static Test suite() {
+    return new TestSuite(SqlitePostDbTest.class);
   }
 
   private SqlitePostDb postDb;
@@ -121,6 +139,10 @@ public class SqlitePostDbTest extends TestCase {
     assertCanDelete(AUDIO_POST_1);
   }
 
+  public void testDelete_chatPost() throws SQLException {
+    assertCanDelete(CHAT_POST_1);
+  }
+
   public void testDelete_textPost() throws SQLException {
     assertCanDelete(TEXT_POST_1);
   }
@@ -133,6 +155,10 @@ public class SqlitePostDbTest extends TestCase {
     assertCanEdit(AUDIO_POST_1, AUDIO_POST_1_EDITED);
   }
 
+  public void testEdit_chatPost() throws SQLException {
+    assertCanEdit(CHAT_POST_1, CHAT_POST_1_EDITED);
+  }
+
   public void testEdit_textPost() throws SQLException {
     assertCanEdit(TEXT_POST_1, TEXT_POST_1_EDITED);
   }
@@ -143,6 +169,10 @@ public class SqlitePostDbTest extends TestCase {
 
   public void testGet_audioPost() throws SQLException {
     assertCanGet(AUDIO_POST_1);
+  }
+
+  public void testGet_chatPost() throws SQLException {
+    assertCanGet(CHAT_POST_1);
   }
 
   public void testGet_nonexistent() throws SQLException {
@@ -161,11 +191,11 @@ public class SqlitePostDbTest extends TestCase {
     assertCanPut(AUDIO_POST_1);
   }
 
-  public void testPut_textPost() throws SQLException {
-    assertCanPut(TEXT_POST_1);
+  public void testPut_chatPost() throws SQLException {
+    assertCanPut(CHAT_POST_1);
   }
 
-  public static Test suite() {
-    return new TestSuite(SqlitePostDbTest.class);
+  public void testPut_textPost() throws SQLException {
+    assertCanPut(TEXT_POST_1);
   }
 }

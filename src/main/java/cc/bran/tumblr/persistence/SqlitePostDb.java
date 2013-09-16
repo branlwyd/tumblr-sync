@@ -7,6 +7,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
@@ -18,6 +19,7 @@ import sun.reflect.generics.reflectiveObjects.NotImplementedException;
 import cc.bran.tumblr.types.AnswerPost;
 import cc.bran.tumblr.types.AudioPost;
 import cc.bran.tumblr.types.ChatPost;
+import cc.bran.tumblr.types.ChatPost.Dialogue;
 import cc.bran.tumblr.types.LinkPost;
 import cc.bran.tumblr.types.PhotoPost;
 import cc.bran.tumblr.types.Post;
@@ -93,15 +95,31 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
 
   private static final String AUDIO_POSTS_REQUEST_SQL_TEMPLATE = "SELECT id, album, albumArt, artist, caption, player, plays, trackName, trackNumber, year FROM audioPosts WHERE id IN (%s);";
 
+  private static final String CHAT_POST_DIALOGUE_INSERT_SQL = "INSERT INTO chatPostDialogue (postId, dialogueId, dialogueIndex) VALUES (?, ?, ?);";
+
+  private static final String CHAT_POST_DIALOGUE_REQUEST_SQL_TEMPLATE = "SELECT chatPostDialogue.postId, dialogue.label, dialogue.name, dialogue.phrase FROM chatPostDialogue JOIN dialogue ON dialogue.id = chatPostDialogue.dialogueId WHERE chatPostDialogue.postId IN (%s) ORDER BY chatPostDialogue.dialogueIndex;";
+
+  private static final String CHAT_POST_INSERT_SQL = "INSERT INTO chatPosts (id, body, title) VALUES (?, ?, ?);";
+
+  private static final String CHAT_POSTS_REQUEST_SQL_TEMPLATE = "SELECT id, body, title FROM chatPosts WHERE id IN (%s);";
+
   private static final String DELETE_ANSWER_POSTS_SQL_TEMPLATE = "DELETE FROM answerPosts WHERE id IN (%s);";
 
   private static final String DELETE_AUDIO_POSTS_SQL_TEMPLATE = "DELETE FROM audioPosts WHERE id IN (%s);";
+
+  private static final String DELETE_CHAT_POST_DIALOGUE_SQL_TEMPLATE = "DELETE FROM chatPostDialogue WHERE postId IN (%s);";
+
+  private static final String DELETE_CHAT_POSTS_SQL_TEMPLATE = "DELETE FROM chatPosts WHERE id IN (%s);";
+
+  private static final String DELETE_DIALOGUE_SQL_TEMPLATE = "DELETE FROM dialogue WHERE id IN (SELECT dialogueId FROM chatPostDialogue WHERE postId IN (%s));";
 
   private static final String DELETE_POST_TAGS_SQL_TEMPLATE = "DELETE FROM postTags WHERE postId IN (%s);";
 
   private static final String DELETE_POSTS_SQL_TEMPLATE = "DELETE FROM posts WHERE id IN (%s)";
 
   private static final String DELETE_TEXT_POSTS_SQL_TEMPLATE = "DELETE FROM textPosts WHERE id IN (%s);";
+
+  private static final String DIALOGUE_INSERT_SQL = "INSERT INTO dialogue (label, name, phrase) VALUES (?, ?, ?);";
 
   private static final String POST_INSERT_SQL = "INSERT INTO posts (id, blogName, postUrl, postedTimestamp, retrievedTimestamp, postTypeId) SELECT ?, ?, ?, ?, ?, id FROM postTypes WHERE type = ?;";
 
@@ -127,11 +145,26 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     }
   }
 
+  private static String buildInQuery(int numItemsInSet) {
+    Preconditions.checkArgument(numItemsInSet > 0);
+    StringBuilder builder = new StringBuilder("?");
+    while (--numItemsInSet > 0) {
+      builder.append(", ?");
+    }
+    return builder.toString();
+  }
+
   private final PreparedStatement answerPostInsertStatement;
 
   private final PreparedStatement audioPostInsertStatement;
 
+  private final PreparedStatement chatPostDialogueInsertStatement;
+
+  private final PreparedStatement chatPostInsertStatement;
+
   private final Connection connection;
+
+  private final PreparedStatement dialogueInsertStatement;
 
   private final PreparedStatement postInsertStatement;
 
@@ -150,6 +183,9 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
 
     answerPostInsertStatement = connection.prepareStatement(ANSWER_POST_INSERT_SQL);
     audioPostInsertStatement = connection.prepareStatement(AUDIO_POST_INSERT_SQL);
+    chatPostInsertStatement = connection.prepareStatement(CHAT_POST_INSERT_SQL);
+    chatPostDialogueInsertStatement = connection.prepareStatement(CHAT_POST_DIALOGUE_INSERT_SQL);
+    dialogueInsertStatement = connection.prepareStatement(DIALOGUE_INSERT_SQL);
     postRequestStatement = connection.prepareStatement(POST_REQUEST_SQL);
     postInsertStatement = connection.prepareStatement(POST_INSERT_SQL);
     postTagInsertStatement = connection.prepareStatement(POST_TAG_INSERT_SQL);
@@ -165,6 +201,9 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
   public void close() throws SQLException {
     answerPostInsertStatement.close();
     audioPostInsertStatement.close();
+    chatPostInsertStatement.close();
+    chatPostDialogueInsertStatement.close();
+    dialogueInsertStatement.close();
     postRequestStatement.close();
     postInsertStatement.close();
     postTagInsertStatement.close();
@@ -207,6 +246,39 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
         deleteAudioPostsStatement.setLong(index++, id);
       }
       deleteAudioPostsStatement.execute();
+    }
+
+    // Delete chat post-related data.
+    String deleteDialogueSql = String
+            .format(DELETE_DIALOGUE_SQL_TEMPLATE, buildInQuery(ids.size()));
+    try (PreparedStatement deleteDialogueStatement = connection.prepareStatement(deleteDialogueSql)) {
+      int index = 1;
+      for (long id : ids) {
+        deleteDialogueStatement.setLong(index++, id);
+      }
+      deleteDialogueStatement.execute();
+    }
+
+    String deletechatPostDialogueSql = String.format(DELETE_CHAT_POST_DIALOGUE_SQL_TEMPLATE,
+            buildInQuery(ids.size()));
+    try (PreparedStatement deletechatPostDialogueStatement = connection
+            .prepareStatement(deletechatPostDialogueSql)) {
+      int index = 1;
+      for (long id : ids) {
+        deletechatPostDialogueStatement.setLong(index++, id);
+      }
+      deletechatPostDialogueStatement.execute();
+    }
+
+    String deleteChatPostsSql = String.format(DELETE_CHAT_POSTS_SQL_TEMPLATE,
+            buildInQuery(ids.size()));
+    try (PreparedStatement deleteChatPostsStatement = connection
+            .prepareStatement(deleteChatPostsSql)) {
+      int index = 1;
+      for (long id : ids) {
+        deleteChatPostsStatement.setLong(index++, id);
+      }
+      deleteChatPostsStatement.execute();
     }
 
     // Delete text post-related data.
@@ -313,10 +385,68 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     }
   }
 
+  private void doGetChatPostData(Map<Long, ChatPost.Builder> builderById) throws SQLException {
+    if (builderById.isEmpty()) {
+      return;
+    }
+
+    // Get basic chat post data.
+    String chatPostsRequestSql = String.format(CHAT_POSTS_REQUEST_SQL_TEMPLATE,
+            buildInQuery(builderById.size()));
+    try (PreparedStatement chatPostsRequestStatement = connection
+            .prepareStatement(chatPostsRequestSql)) {
+      int index = 1;
+      for (long id : builderById.keySet()) {
+        chatPostsRequestStatement.setLong(index++, id);
+      }
+
+      try (ResultSet resultSet = chatPostsRequestStatement.executeQuery()) {
+        while (resultSet.next()) {
+          ChatPost.Builder postBuilder = builderById.get(resultSet.getLong("id"));
+          postBuilder.setBody(resultSet.getString("body"));
+          postBuilder.setTitle(resultSet.getString("title"));
+        }
+      }
+    }
+
+    // Get dialogue.
+    Map<Long, ImmutableList.Builder<Dialogue>> dialogueBuilderById = new HashMap<>();
+    for (long id : builderById.keySet()) {
+      dialogueBuilderById.put(id, new ImmutableList.Builder<Dialogue>());
+    }
+
+    String chatPostDialogueRequestSql = String.format(CHAT_POST_DIALOGUE_REQUEST_SQL_TEMPLATE,
+            buildInQuery(builderById.size()));
+    try (PreparedStatement chatPostDialogueRequestStatement = connection
+            .prepareStatement(chatPostDialogueRequestSql)) {
+      int index = 1;
+      for (long id : builderById.keySet()) {
+        chatPostDialogueRequestStatement.setLong(index++, id);
+      }
+
+      try (ResultSet resultSet = chatPostDialogueRequestStatement.executeQuery()) {
+        while (resultSet.next()) {
+          ImmutableList.Builder<Dialogue> dialogueBuilder = dialogueBuilderById.get(resultSet
+                  .getLong("postId"));
+          dialogueBuilder.add(new Dialogue(resultSet.getString("name"), resultSet
+                  .getString("label"), resultSet.getString("phrase")));
+        }
+      }
+    }
+
+    for (Map.Entry<Long, ChatPost.Builder> entry : builderById.entrySet()) {
+      long id = entry.getKey();
+      ChatPost.Builder postBuilder = entry.getValue();
+
+      postBuilder.setDialogue(dialogueBuilderById.get(id).build());
+    }
+  }
+
   private List<Post> doGetFromResultSet(ResultSet resultSet) throws SQLException {
     Map<Long, Post.Builder> builderById = new HashMap<>();
     Map<Long, AnswerPost.Builder> answerBuilderById = new HashMap<>();
     Map<Long, AudioPost.Builder> audioBuilderById = new HashMap<>();
+    Map<Long, ChatPost.Builder> chatBuilderById = new HashMap<>();
     Map<Long, TextPost.Builder> textBuilderById = new HashMap<>();
 
     // Extract basic data from results & categorize them by type.
@@ -336,7 +466,8 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
         break;
       case CHAT:
         postBuilder = new ChatPost.Builder();
-        throw new NotImplementedException();
+        chatBuilderById.put(id, (ChatPost.Builder) postBuilder);
+        break;
       case LINK:
         postBuilder = new LinkPost.Builder();
         throw new NotImplementedException();
@@ -372,6 +503,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     doGetTagData(builderById);
     doGetAnswerPostData(answerBuilderById);
     doGetAudioPostData(audioBuilderById);
+    doGetChatPostData(chatBuilderById);
     doGetTextPostData(textBuilderById);
 
     // Build result.
@@ -455,6 +587,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     Map<Long, Post> postById = new HashMap<>();
     Map<Long, AnswerPost> answerPostById = new HashMap<>();
     Map<Long, AudioPost> audioPostById = new HashMap<>();
+    Map<Long, ChatPost> chatPostById = new HashMap<>();
     Map<Long, TextPost> textPostById = new HashMap<>();
 
     for (Post post : posts) {
@@ -468,7 +601,8 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
         audioPostById.put(post.getId(), (AudioPost) post);
         break;
       case CHAT:
-        throw new NotImplementedException();
+        chatPostById.put(post.getId(), (ChatPost) post);
+        break;
       case LINK:
         throw new NotImplementedException();
       case PHOTO:
@@ -505,6 +639,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     doPutTagData(postById);
     doPutAudioPostData(audioPostById);
     doPutAnswerPostData(answerPostById);
+    doPutChatPostData(chatPostById);
     doPutTextPostData(textPostById);
   }
 
@@ -543,6 +678,60 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
       audioPostInsertStatement.addBatch();
     }
     audioPostInsertStatement.executeBatch();
+  }
+
+  private void doPutChatPostData(Map<Long, ChatPost> postById) throws SQLException {
+    if (postById.isEmpty()) {
+      return;
+    }
+
+    // Insert dialogue.
+    int totalDialogue = 0;
+    Map<Long, List<Integer>> dialogueIdsByPostId = new HashMap<>();
+    for (ChatPost post : postById.values()) {
+      List<Integer> dialogueIds = new ArrayList<Integer>();
+      for (Dialogue dialogue : post.getDialogue()) {
+        totalDialogue++;
+
+        dialogueInsertStatement.setString(1, dialogue.getLabel());
+        dialogueInsertStatement.setString(2, dialogue.getName());
+        dialogueInsertStatement.setString(3, dialogue.getPhrase());
+        dialogueInsertStatement.execute();
+
+        try (ResultSet resultSet = dialogueInsertStatement.getGeneratedKeys()) {
+          int id = resultSet.getInt(1);
+          dialogueIds.add(id);
+        }
+      }
+      dialogueIdsByPostId.put(post.getId(), dialogueIds);
+    }
+
+    // Insert chatPosts.
+    for (ChatPost post : postById.values()) {
+      chatPostInsertStatement.setLong(1, post.getId());
+      chatPostInsertStatement.setString(2, post.getBody());
+      chatPostInsertStatement.setString(3, post.getTitle());
+      chatPostInsertStatement.addBatch();
+    }
+    chatPostInsertStatement.executeBatch();
+
+    // Insert chatPostDialogue.
+    if (totalDialogue == 0) {
+      return;
+    }
+
+    for (long postId : postById.keySet()) {
+      List<Integer> dialogueIds = dialogueIdsByPostId.get(postId);
+
+      int index = 0;
+      for (int dialogueId : dialogueIds) {
+        chatPostDialogueInsertStatement.setLong(1, postId);
+        chatPostDialogueInsertStatement.setInt(2, dialogueId);
+        chatPostDialogueInsertStatement.setInt(3, index++);
+        chatPostDialogueInsertStatement.addBatch();
+      }
+    }
+    chatPostDialogueInsertStatement.executeBatch();
   }
 
   private void doPutTagData(Map<Long, Post> postById) throws SQLException {
@@ -745,14 +934,5 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
         return null;
       }
     }.execute();
-  }
-
-  private static String buildInQuery(int numItemsInSet) {
-    Preconditions.checkArgument(numItemsInSet > 0);
-    StringBuilder builder = new StringBuilder("?");
-    while (--numItemsInSet > 0) {
-      builder.append(", ?");
-    }
-    return builder.toString();
   }
 }
