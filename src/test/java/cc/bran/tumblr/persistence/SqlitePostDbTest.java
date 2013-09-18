@@ -17,6 +17,7 @@ import cc.bran.tumblr.types.ChatPost;
 import cc.bran.tumblr.types.ChatPost.Dialogue;
 import cc.bran.tumblr.types.LinkPost;
 import cc.bran.tumblr.types.Post;
+import cc.bran.tumblr.types.QuotePost;
 import cc.bran.tumblr.types.TextPost;
 
 import com.google.common.collect.ImmutableList;
@@ -68,6 +69,15 @@ public class SqlitePostDbTest extends TestCase {
           "http://foo.tumblr.com/4003/whee", Instant.now(), Instant.now(), ImmutableList.of("tag5",
                   "tag6"), "new-title", "new-url", "new-description");
 
+  private static final Post QUOTE_POST_1 = new QuotePost(3324, "foo.tumblr.com",
+          "http://foo.tumblr.com/posts/3324/whee", Instant.now().minus(Duration.millis(332)),
+          Instant.now(), ImmutableList.of("tag1", "tag2", "tag5"),
+          "a fool and his money are soon parted", "danny de vito");
+
+  private static final Post QUOTE_POST_1_EDITED = new QuotePost(3324, "foo.tumblr.com",
+          "http://foo.tumblr.com/posts/3324/whee", Instant.now().minus(Duration.millis(332)),
+          Instant.now(), ImmutableList.of("tag1", "tag2", "tag5"), "oi u wat mate", "danny de vito");
+
   private static final Post TEXT_POST_1 = new TextPost(513, "foo.tumblr.com",
           "http://foo.tumblr.com/posts/513/whee", Instant.now().minus(Duration.millis(5000)),
           Instant.now(), ImmutableList.of("tag1", "tag2", "tag3"), "test post",
@@ -84,10 +94,6 @@ public class SqlitePostDbTest extends TestCase {
     } catch (ClassNotFoundException exception) {
       throw new AssertionError("org.sqlite.JDBC must be available", exception);
     }
-  }
-
-  public static Test suite() {
-    return new TestSuite(SqlitePostDbTest.class);
   }
 
   private SqlitePostDb postDb;
@@ -156,6 +162,10 @@ public class SqlitePostDbTest extends TestCase {
     assertCanDelete(LINK_POST_1);
   }
 
+  public void testDelete_quotePost() throws SQLException {
+    assertCanDelete(QUOTE_POST_1);
+  }
+
   public void testDelete_textPost() throws SQLException {
     assertCanDelete(TEXT_POST_1);
   }
@@ -174,6 +184,10 @@ public class SqlitePostDbTest extends TestCase {
 
   public void testEdit_linkPost() throws SQLException {
     assertCanEdit(LINK_POST_1, LINK_POST_1_EDITED);
+  }
+
+  public void testEdit_quotePost() throws SQLException {
+    assertCanEdit(QUOTE_POST_1, QUOTE_POST_1_EDITED);
   }
 
   public void testEdit_textPost() throws SQLException {
@@ -200,6 +214,10 @@ public class SqlitePostDbTest extends TestCase {
     assertNull(postDb.get(12345));
   }
 
+  public void testGet_quotePost() throws SQLException {
+    assertCanGet(QUOTE_POST_1);
+  }
+
   public void testGet_textPost() throws SQLException {
     assertCanGet(TEXT_POST_1);
   }
@@ -220,7 +238,15 @@ public class SqlitePostDbTest extends TestCase {
     assertCanPut(LINK_POST_1);
   }
 
+  public void testPut_quotePost() throws SQLException {
+    assertCanPut(QUOTE_POST_1);
+  }
+
   public void testPut_textPost() throws SQLException {
     assertCanPut(TEXT_POST_1);
+  }
+
+  public static Test suite() {
+    return new TestSuite(SqlitePostDbTest.class);
   }
 }

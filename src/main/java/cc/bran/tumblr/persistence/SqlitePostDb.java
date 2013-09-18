@@ -119,6 +119,8 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
 
   private static final String DELETE_POSTS_SQL_TEMPLATE = "DELETE FROM posts WHERE id IN (%s);";
 
+  private static final String DELETE_QUOTE_POSTS_SQL_TEMPLATE = "DELETE FROM quotePosts WHERE id IN (%s);";
+
   private static final String DELETE_TEXT_POSTS_SQL_TEMPLATE = "DELETE FROM textPosts WHERE id IN (%s);";
 
   private static final String DIALOGUE_INSERT_SQL = "INSERT INTO dialogue (label, name, phrase) VALUES (?, ?, ?);";
@@ -133,6 +135,10 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
 
   private static final String POST_TAG_INSERT_SQL = "INSERT INTO postTags (postId, tagId, tagIndex) VALUES (?, ?, ?);";
 
+  private static final String QUOTE_POST_INSERT_SQL = "INSERT INTO quotePosts (id, source, text) VALUES (?, ?, ?);";
+
+  private static final String QUOTE_POSTS_REQUEST_SQL_TEMPLATE = "SELECT id, source, text FROM quotePosts WHERE id IN (%s);";
+
   private static final String TAG_INSERT_SQL = "INSERT INTO tags (tag) VALUES (?);";
 
   private static final String TAG_REQUEST_BY_NAME_SQL_TEMPLATE = "SELECT id, tag FROM tags WHERE tag IN (%s);";
@@ -141,7 +147,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
 
   private static final String TEXT_POST_INSERT_SQL = "INSERT INTO textPosts (id, title, body) VALUES (?, ?, ?);";
 
-  private static final String TEXT_POST_REQUEST_SQL_TEMPLATE = "SELECT id, title, body FROM textPosts WHERE id IN (%s);";
+  private static final String TEXT_POSTS_REQUEST_SQL_TEMPLATE = "SELECT id, title, body FROM textPosts WHERE id IN (%s);";
 
   static {
     try {
@@ -149,15 +155,6 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     } catch (ClassNotFoundException exception) {
       throw new AssertionError("org.sqlite.JDBC must be available", exception);
     }
-  }
-
-  private static String buildInQuery(int numItemsInSet) {
-    Preconditions.checkArgument(numItemsInSet > 0);
-    StringBuilder builder = new StringBuilder("?");
-    while (--numItemsInSet > 0) {
-      builder.append(", ?");
-    }
-    return builder.toString();
   }
 
   private final PreparedStatement answerPostInsertStatement;
@@ -180,6 +177,8 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
 
   private final PreparedStatement postTagInsertStatement;
 
+  private final PreparedStatement quotePostInsertStatement;
+
   private final PreparedStatement tagInsertStatement;
 
   private final PreparedStatement textPostInsertStatement;
@@ -198,6 +197,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     postRequestStatement = connection.prepareStatement(POST_REQUEST_SQL);
     postInsertStatement = connection.prepareStatement(POST_INSERT_SQL);
     postTagInsertStatement = connection.prepareStatement(POST_TAG_INSERT_SQL);
+    quotePostInsertStatement = connection.prepareStatement(QUOTE_POST_INSERT_SQL);
     tagInsertStatement = connection.prepareStatement(TAG_INSERT_SQL);
     textPostInsertStatement = connection.prepareStatement(TEXT_POST_INSERT_SQL);
   }
@@ -217,6 +217,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     postRequestStatement.close();
     postInsertStatement.close();
     postTagInsertStatement.close();
+    quotePostInsertStatement.close();
     tagInsertStatement.close();
     textPostInsertStatement.close();
   }
@@ -301,6 +302,18 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
         deleteLinkPostsStatement.setLong(index++, id);
       }
       deleteLinkPostsStatement.execute();
+    }
+
+    // Delete quote post-related data.
+    String deleteQuotePostsSql = String.format(DELETE_QUOTE_POSTS_SQL_TEMPLATE,
+            buildInQuery(ids.size()));
+    try (PreparedStatement deleteQuotePostsStatement = connection
+            .prepareStatement(deleteQuotePostsSql)) {
+      int index = 1;
+      for (long id : ids) {
+        deleteQuotePostsStatement.setLong(index++, id);
+      }
+      deleteQuotePostsStatement.execute();
     }
 
     // Delete text post-related data.
@@ -470,6 +483,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     Map<Long, AudioPost.Builder> audioBuilderById = new HashMap<>();
     Map<Long, ChatPost.Builder> chatBuilderById = new HashMap<>();
     Map<Long, LinkPost.Builder> linkBuilderById = new HashMap<>();
+    Map<Long, QuotePost.Builder> quoteBuilderById = new HashMap<>();
     Map<Long, TextPost.Builder> textBuilderById = new HashMap<>();
 
     // Extract basic data from results & categorize them by type.
@@ -500,7 +514,8 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
         throw new NotImplementedException();
       case QUOTE:
         postBuilder = new QuotePost.Builder();
-        throw new NotImplementedException();
+        quoteBuilderById.put(id, (QuotePost.Builder) postBuilder);
+        break;
       case TEXT:
         postBuilder = new TextPost.Builder();
         textBuilderById.put(id, (TextPost.Builder) postBuilder);
@@ -529,6 +544,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     doGetAudioPostData(audioBuilderById);
     doGetChatPostData(chatBuilderById);
     doGetLinkPostData(linkBuilderById);
+    doGetQuotePostData(quoteBuilderById);
     doGetTextPostData(textBuilderById);
 
     // Build result.
@@ -559,6 +575,30 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
           postBuilder.setDescription(resultSet.getString("description"));
           postBuilder.setTitle(resultSet.getString("title"));
           postBuilder.setUrl(resultSet.getString("url"));
+        }
+      }
+    }
+  }
+
+  private void doGetQuotePostData(Map<Long, QuotePost.Builder> builderById) throws SQLException {
+    if (builderById.isEmpty()) {
+      return;
+    }
+
+    String quotePostsRequestSql = String.format(QUOTE_POSTS_REQUEST_SQL_TEMPLATE,
+            buildInQuery(builderById.size()));
+    try (PreparedStatement quotePostsRequestStatement = connection
+            .prepareStatement(quotePostsRequestSql)) {
+      int index = 1;
+      for (long id : builderById.keySet()) {
+        quotePostsRequestStatement.setLong(index++, id);
+      }
+
+      try (ResultSet resultSet = quotePostsRequestStatement.executeQuery()) {
+        while (resultSet.next()) {
+          QuotePost.Builder builder = builderById.get(resultSet.getLong("id"));
+          builder.setSource(resultSet.getString("source"));
+          builder.setText(resultSet.getString("text"));
         }
       }
     }
@@ -608,16 +648,16 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
       return;
     }
 
-    String textPostRequestSql = String.format(TEXT_POST_REQUEST_SQL_TEMPLATE,
+    String textPostsRequestSql = String.format(TEXT_POSTS_REQUEST_SQL_TEMPLATE,
             buildInQuery(builderById.size()));
-    try (PreparedStatement textPostRequestStatement = connection
-            .prepareStatement(textPostRequestSql)) {
+    try (PreparedStatement textPostsRequestStatement = connection
+            .prepareStatement(textPostsRequestSql)) {
       int index = 1;
       for (long id : builderById.keySet()) {
-        textPostRequestStatement.setLong(index++, id);
+        textPostsRequestStatement.setLong(index++, id);
       }
 
-      try (ResultSet resultSet = textPostRequestStatement.executeQuery()) {
+      try (ResultSet resultSet = textPostsRequestStatement.executeQuery()) {
         while (resultSet.next()) {
           TextPost.Builder builder = builderById.get(resultSet.getLong("id"));
           builder.setTitle(resultSet.getString("title"));
@@ -638,6 +678,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     Map<Long, AudioPost> audioPostById = new HashMap<>();
     Map<Long, ChatPost> chatPostById = new HashMap<>();
     Map<Long, LinkPost> linkPostById = new HashMap<>();
+    Map<Long, QuotePost> quotePostById = new HashMap<>();
     Map<Long, TextPost> textPostById = new HashMap<>();
 
     for (Post post : posts) {
@@ -659,7 +700,8 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
       case PHOTO:
         throw new NotImplementedException();
       case QUOTE:
-        throw new NotImplementedException();
+        quotePostById.put(post.getId(), (QuotePost) post);
+        break;
       case TEXT:
         textPostById.put(post.getId(), (TextPost) post);
         break;
@@ -692,6 +734,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     doPutAnswerPostData(answerPostById);
     doPutChatPostData(chatPostById);
     doPutLinkPostData(linkPostById);
+    doPutQuotePostData(quotePostById);
     doPutTextPostData(textPostById);
   }
 
@@ -799,6 +842,20 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
       linkPostInsertStatement.addBatch();
     }
     linkPostInsertStatement.executeBatch();
+  }
+
+  private void doPutQuotePostData(Map<Long, QuotePost> postById) throws SQLException {
+    if (postById.isEmpty()) {
+      return;
+    }
+
+    for (QuotePost post : postById.values()) {
+      quotePostInsertStatement.setLong(1, post.getId());
+      quotePostInsertStatement.setString(2, post.getSource());
+      quotePostInsertStatement.setString(3, post.getText());
+      quotePostInsertStatement.addBatch();
+    }
+    quotePostInsertStatement.executeBatch();
   }
 
   private void doPutTagData(Map<Long, Post> postById) throws SQLException {
@@ -1001,5 +1058,14 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
         return null;
       }
     }.execute();
+  }
+
+  private static String buildInQuery(int numItemsInSet) {
+    Preconditions.checkArgument(numItemsInSet > 0);
+    StringBuilder builder = new StringBuilder("?");
+    while (--numItemsInSet > 0) {
+      builder.append(", ?");
+    }
+    return builder.toString();
   }
 }
