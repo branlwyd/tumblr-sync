@@ -27,10 +27,12 @@ import cc.bran.tumblr.types.PostType;
 import cc.bran.tumblr.types.QuotePost;
 import cc.bran.tumblr.types.TextPost;
 import cc.bran.tumblr.types.VideoPost;
+import cc.bran.tumblr.types.VideoPost.Video;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 
 /**
  * Persists {@link Post}s using an SQLite backend.
@@ -98,6 +100,10 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
   private static final String CHAT_POST_DIALOGUE_INSERT_SQL = "INSERT INTO chatPostDialogue (postId, dialogueId, dialogueIndex) VALUES (?, ?, ?);";
 
   private static final String CHAT_POST_DIALOGUE_REQUEST_SQL_TEMPLATE = "SELECT chatPostDialogue.postId, dialogue.label, dialogue.name, dialogue.phrase FROM chatPostDialogue JOIN dialogue ON dialogue.id = chatPostDialogue.dialogueId WHERE chatPostDialogue.postId IN (%s) ORDER BY chatPostDialogue.dialogueIndex;";
+
+  private static final String VIDEO_POSTS_REQUEST_SQL_TEMPLATE = "SELECT id, caption FROM videoPosts WHERE id IN (%s);";
+  
+  private static final String VIDEO_POST_VIDEOS_REQUEST_SQL_TEMPLATE = "SELECT videoPostVideos.postId, videos.embedCode, videos.width FROM videoPostVideos JOIN videos ON videos.id = videoPostVideos.videoId WHERE videoPostVideos.postId IN (%s) ORDER BY videoPostVideos.videoIndex;";
 
   private static final String CHAT_POST_INSERT_SQL = "INSERT INTO chatPosts (id, body, title) VALUES (?, ?, ?);";
 
@@ -327,6 +333,9 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
       }
       deleteTextPostsStatement.execute();
     }
+    
+    // Delete video post-related data.
+    // TODO(bpitman)
 
     // Delete tag-related data.
     String deletePostTagsSql = String.format(DELETE_POST_TAGS_SQL_TEMPLATE,
@@ -485,6 +494,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     Map<Long, LinkPost.Builder> linkBuilderById = new HashMap<>();
     Map<Long, QuotePost.Builder> quoteBuilderById = new HashMap<>();
     Map<Long, TextPost.Builder> textBuilderById = new HashMap<>();
+    Map<Long, VideoPost.Builder> videoBuilderById = new HashMap<>();
 
     // Extract basic data from results & categorize them by type.
     while (resultSet.next()) {
@@ -522,7 +532,8 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
         break;
       case VIDEO:
         postBuilder = new VideoPost.Builder();
-        throw new NotImplementedException();
+        videoBuilderById.put(id, (VideoPost.Builder) postBuilder);
+        break;
       default:
         throw new AssertionError(String.format("Post %d has impossible type %s.", id,
                 postType.toString()));
@@ -546,6 +557,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     doGetLinkPostData(linkBuilderById);
     doGetQuotePostData(quoteBuilderById);
     doGetTextPostData(textBuilderById);
+    doGetVideoPostData(videoBuilderById);
 
     // Build result.
     ImmutableList.Builder<Post> resultBuilder = ImmutableList.builder();
@@ -666,6 +678,49 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
       }
     }
   }
+  
+  private void doGetVideoPostData(Map<Long, VideoPost.Builder> builderById) throws SQLException {
+    if (builderById.isEmpty()) {
+      return;
+    }
+    
+    // Get basic video post information.
+    String videoPostsRequestSql = String.format(VIDEO_POSTS_REQUEST_SQL_TEMPLATE, buildInQuery(builderById.size()));
+    try (PreparedStatement videoPostsRequestStatement = connection.prepareStatement(videoPostsRequestSql)) {
+      int index = 1;
+      for (long id : builderById.keySet()) {
+        videoPostsRequestStatement.setLong(index++, id);
+      }
+      
+      try (ResultSet resultSet = videoPostsRequestStatement.executeQuery()) {
+        VideoPost.Builder postBuilder = builderById.get(resultSet.getLong("id"));
+        postBuilder.setCaption(resultSet.getString(resultSet.getString("caption")));
+      }
+    }
+    
+    // Get videos.
+    Map<Long, ImmutableList.Builder<Video>> videoBuilderById = new HashMap<>();
+    for (long id : builderById.keySet()) {
+      videoBuilderById.put(id, new ImmutableList.Builder<Video>());
+    }
+    
+    String videoPostVideosRequestSql = String.format(VIDEO_POST_VIDEOS_REQUEST_SQL_TEMPLATE, buildInQuery(builderById.size()));
+    try (PreparedStatement videoPostVideosRequestStatement = connection.prepareStatement(videoPostVideosRequestSql)) {
+      int index = 1;
+      for (long id : builderById.keySet()) {
+        videoPostVideosRequestStatement.setLong(index++, id);
+      }
+      
+      try (ResultSet resultSet = videoPostVideosRequestStatement.executeQuery()) {
+        ImmutableList.Builder<Video> videoBuilder = videoBuilderById.get(resultSet.getLong("postId"));
+        videoBuilder.add(new Video(resultSet.getInt("width"), resultSet.getString("embedCode")));
+      }
+    }
+    
+    for (long id : builderById.keySet()) {
+      builderById.get(id).setPlayers(videoBuilderById.get(id).build());
+    }
+  }
 
   private void doPut(Collection<Post> posts) throws SQLException {
     if (posts.isEmpty()) {
@@ -680,6 +735,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     Map<Long, LinkPost> linkPostById = new HashMap<>();
     Map<Long, QuotePost> quotePostById = new HashMap<>();
     Map<Long, TextPost> textPostById = new HashMap<>();
+    Map<Long, VideoPost> videoPostById = new HashMap<>();
 
     for (Post post : posts) {
       postById.put(post.getId(), post);
@@ -706,7 +762,8 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
         textPostById.put(post.getId(), (TextPost) post);
         break;
       case VIDEO:
-        throw new NotImplementedException();
+        videoPostById.put(post.getId(), (VideoPost) post);
+        break;
       default:
         throw new AssertionError(String.format("Post %d has impossible type %s.", post.getId(),
                 post.getType().toString()));
@@ -736,6 +793,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     doPutLinkPostData(linkPostById);
     doPutQuotePostData(quotePostById);
     doPutTextPostData(textPostById);
+    doPutVideoPostData(videoPostById);
   }
 
   private void doPutAnswerPostData(Map<Long, AnswerPost> postById) throws SQLException {
@@ -935,6 +993,10 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     }
     textPostInsertStatement.executeBatch();
   }
+  
+  private void doPutVideoPostData(Map<Long, VideoPost> postById) throws SQLException {
+    // TODO(bpitman)
+  }
 
   @Override
   public Post get(final long id) throws SQLException {
@@ -1001,9 +1063,9 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
 
           // Video post-specific tables.
           statement
-                  .execute("CREATE TABLE IF NOT EXISTS players(id INTEGER PRIMARY KEY AUTOINCREMENT, width TEXT NOT NULL, embedCode TEXT NOT NULL);");
+                  .execute("CREATE TABLE IF NOT EXISTS videos(id INTEGER PRIMARY KEY AUTOINCREMENT, width TEXT NOT NULL, embedCode TEXT NOT NULL);");
           statement
-                  .execute("CREATE TABLE IF NOT EXISTS videoPostPlayers(postId INTEGER NOT NULL REFERENCES videoPosts(id), playerId INTEGER NOT NULL REFERENCES players(id), playerIndex INTEGER NOT NULL, PRIMARY KEY(postId, playerId));");
+                  .execute("CREATE TABLE IF NOT EXISTS videoPostVideos(postId INTEGER NOT NULL REFERENCES videoPosts(id), videoId INTEGER NOT NULL REFERENCES videos(id), videoIndex INTEGER NOT NULL, PRIMARY KEY(postId, videoId));");
 
           // Types table.
           statement
@@ -1036,9 +1098,9 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
           statement
                   .execute("CREATE INDEX IF NOT EXISTS chatPostDialogueDialogueIdIndex ON chatPostDialogue(dialogueId);");
           statement
-                  .execute("CREATE INDEX IF NOT EXISTS videoPostPlayersPostIdIndex ON videoPostPlayers(postId);");
+                  .execute("CREATE INDEX IF NOT EXISTS videoPostVideosPostIdIndex ON videoPostVideos(postId);");
           statement
-                  .execute("CREATE INDEX IF NOT EXISTS videoPostPlayersPlayerIdIndex ON videoPostPlayers(playerId);");
+                  .execute("CREATE INDEX IF NOT EXISTS videoPostVideosVideoIdIndex ON videoPostVideos(videoId);");
           statement
                   .execute("CREATE UNIQUE INDEX IF NOT EXISTS postTypesTypeIndex ON postTypes(type);");
 
