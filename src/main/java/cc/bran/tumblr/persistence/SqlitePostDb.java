@@ -32,7 +32,6 @@ import cc.bran.tumblr.types.VideoPost.Video;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
 
 /**
  * Persists {@link Post}s using an SQLite backend.
@@ -101,10 +100,6 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
 
   private static final String CHAT_POST_DIALOGUE_REQUEST_SQL_TEMPLATE = "SELECT chatPostDialogue.postId, dialogue.label, dialogue.name, dialogue.phrase FROM chatPostDialogue JOIN dialogue ON dialogue.id = chatPostDialogue.dialogueId WHERE chatPostDialogue.postId IN (%s) ORDER BY chatPostDialogue.dialogueIndex;";
 
-  private static final String VIDEO_POSTS_REQUEST_SQL_TEMPLATE = "SELECT id, caption FROM videoPosts WHERE id IN (%s);";
-  
-  private static final String VIDEO_POST_VIDEOS_REQUEST_SQL_TEMPLATE = "SELECT videoPostVideos.postId, videos.embedCode, videos.width FROM videoPostVideos JOIN videos ON videos.id = videoPostVideos.videoId WHERE videoPostVideos.postId IN (%s) ORDER BY videoPostVideos.videoIndex;";
-
   private static final String CHAT_POST_INSERT_SQL = "INSERT INTO chatPosts (id, body, title) VALUES (?, ?, ?);";
 
   private static final String CHAT_POSTS_REQUEST_SQL_TEMPLATE = "SELECT id, body, title FROM chatPosts WHERE id IN (%s);";
@@ -128,6 +123,12 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
   private static final String DELETE_QUOTE_POSTS_SQL_TEMPLATE = "DELETE FROM quotePosts WHERE id IN (%s);";
 
   private static final String DELETE_TEXT_POSTS_SQL_TEMPLATE = "DELETE FROM textPosts WHERE id IN (%s);";
+
+  private static final String DELETE_VIDEO_POST_VIDEOS_SQL_TEMPLATE = "DELETE FROM videoPostVideos WHERE postId IN (%s);";
+
+  private static final String DELETE_VIDEO_POSTS_SQL_TEMPLATE = "DELETE FROM videoPosts WHERE id IN (%s);";
+
+  private static final String DELETE_VIDEOS_SQL_TEMPLATE = "DELETE FROM videos WHERE id IN (SELECT videoId FROM videoPostVideos WHERE postId IN (%s));";
 
   private static final String DIALOGUE_INSERT_SQL = "INSERT INTO dialogue (label, name, phrase) VALUES (?, ?, ?);";
 
@@ -154,6 +155,16 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
   private static final String TEXT_POST_INSERT_SQL = "INSERT INTO textPosts (id, title, body) VALUES (?, ?, ?);";
 
   private static final String TEXT_POSTS_REQUEST_SQL_TEMPLATE = "SELECT id, title, body FROM textPosts WHERE id IN (%s);";
+
+  private static final String VIDEO_INSERT_SQL = "INSERT INTO videos (embedCode, width) VALUES (?, ?);";
+
+  private static final String VIDEO_POST_INSERT_SQL = "INSERT INTO videoPosts (id, caption) VALUES (?, ?);";
+
+  private static final String VIDEO_POST_VIDEO_INSERT_SQL = "INSERT INTO videoPostVideos (postId, videoId, videoIndex) VALUES (?, ?, ?);";
+
+  private static final String VIDEO_POST_VIDEOS_REQUEST_SQL_TEMPLATE = "SELECT videoPostVideos.postId, videos.embedCode, videos.width FROM videoPostVideos JOIN videos ON videos.id = videoPostVideos.videoId WHERE videoPostVideos.postId IN (%s) ORDER BY videoPostVideos.videoIndex;";
+
+  private static final String VIDEO_POSTS_REQUEST_SQL_TEMPLATE = "SELECT id, caption FROM videoPosts WHERE id IN (%s);";
 
   static {
     try {
@@ -189,6 +200,12 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
 
   private final PreparedStatement textPostInsertStatement;
 
+  private final PreparedStatement videoInsertStatement;
+
+  private final PreparedStatement videoPostInsertStatement;
+
+  private final PreparedStatement videoPostVideoInsertStatement;
+
   @VisibleForTesting
   SqlitePostDb(Connection connection) throws SQLException {
     this.connection = connection;
@@ -206,6 +223,9 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     quotePostInsertStatement = connection.prepareStatement(QUOTE_POST_INSERT_SQL);
     tagInsertStatement = connection.prepareStatement(TAG_INSERT_SQL);
     textPostInsertStatement = connection.prepareStatement(TEXT_POST_INSERT_SQL);
+    videoInsertStatement = connection.prepareStatement(VIDEO_INSERT_SQL);
+    videoPostInsertStatement = connection.prepareStatement(VIDEO_POST_INSERT_SQL);
+    videoPostVideoInsertStatement = connection.prepareStatement(VIDEO_POST_VIDEO_INSERT_SQL);
   }
 
   public SqlitePostDb(String dbFile) throws ClassNotFoundException, SQLException {
@@ -226,6 +246,9 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     quotePostInsertStatement.close();
     tagInsertStatement.close();
     textPostInsertStatement.close();
+    videoInsertStatement.close();
+    videoPostInsertStatement.close();
+    videoPostVideoInsertStatement.close();
   }
 
   @Override
@@ -333,9 +356,38 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
       }
       deleteTextPostsStatement.execute();
     }
-    
+
     // Delete video post-related data.
-    // TODO(bpitman)
+    String deleteVideosSql = String.format(DELETE_VIDEOS_SQL_TEMPLATE, buildInQuery(ids.size()));
+    try (PreparedStatement deleteVideosStatement = connection.prepareStatement(deleteVideosSql)) {
+      int index = 1;
+      for (long id : ids) {
+        deleteVideosStatement.setLong(index++, id);
+      }
+      deleteVideosStatement.execute();
+    }
+
+    String deleteVideoPostVideosSql = String.format(DELETE_VIDEO_POST_VIDEOS_SQL_TEMPLATE,
+            buildInQuery(ids.size()));
+    try (PreparedStatement deleteVideoPostVideosStatement = connection
+            .prepareStatement(deleteVideoPostVideosSql)) {
+      int index = 1;
+      for (long id : ids) {
+        deleteVideoPostVideosStatement.setLong(index++, id);
+      }
+      deleteVideoPostVideosStatement.execute();
+    }
+
+    String deleteVideoPostsSql = String.format(DELETE_VIDEO_POSTS_SQL_TEMPLATE,
+            buildInQuery(ids.size()));
+    try (PreparedStatement deleteVideoPostsStatement = connection
+            .prepareStatement(deleteVideoPostsSql)) {
+      int index = 1;
+      for (long id : ids) {
+        deleteVideoPostsStatement.setLong(index++, id);
+      }
+      deleteVideoPostsStatement.execute();
+    }
 
     // Delete tag-related data.
     String deletePostTagsSql = String.format(DELETE_POST_TAGS_SQL_TEMPLATE,
@@ -678,45 +730,54 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
       }
     }
   }
-  
+
   private void doGetVideoPostData(Map<Long, VideoPost.Builder> builderById) throws SQLException {
     if (builderById.isEmpty()) {
       return;
     }
-    
+
     // Get basic video post information.
-    String videoPostsRequestSql = String.format(VIDEO_POSTS_REQUEST_SQL_TEMPLATE, buildInQuery(builderById.size()));
-    try (PreparedStatement videoPostsRequestStatement = connection.prepareStatement(videoPostsRequestSql)) {
+    String videoPostsRequestSql = String.format(VIDEO_POSTS_REQUEST_SQL_TEMPLATE,
+            buildInQuery(builderById.size()));
+    try (PreparedStatement videoPostsRequestStatement = connection
+            .prepareStatement(videoPostsRequestSql)) {
       int index = 1;
       for (long id : builderById.keySet()) {
         videoPostsRequestStatement.setLong(index++, id);
       }
-      
+
       try (ResultSet resultSet = videoPostsRequestStatement.executeQuery()) {
-        VideoPost.Builder postBuilder = builderById.get(resultSet.getLong("id"));
-        postBuilder.setCaption(resultSet.getString(resultSet.getString("caption")));
+        while (resultSet.next()) {
+          VideoPost.Builder postBuilder = builderById.get(resultSet.getLong("id"));
+          postBuilder.setCaption(resultSet.getString("caption"));
+        }
       }
     }
-    
+
     // Get videos.
     Map<Long, ImmutableList.Builder<Video>> videoBuilderById = new HashMap<>();
     for (long id : builderById.keySet()) {
       videoBuilderById.put(id, new ImmutableList.Builder<Video>());
     }
-    
-    String videoPostVideosRequestSql = String.format(VIDEO_POST_VIDEOS_REQUEST_SQL_TEMPLATE, buildInQuery(builderById.size()));
-    try (PreparedStatement videoPostVideosRequestStatement = connection.prepareStatement(videoPostVideosRequestSql)) {
+
+    String videoPostVideosRequestSql = String.format(VIDEO_POST_VIDEOS_REQUEST_SQL_TEMPLATE,
+            buildInQuery(builderById.size()));
+    try (PreparedStatement videoPostVideosRequestStatement = connection
+            .prepareStatement(videoPostVideosRequestSql)) {
       int index = 1;
       for (long id : builderById.keySet()) {
         videoPostVideosRequestStatement.setLong(index++, id);
       }
-      
+
       try (ResultSet resultSet = videoPostVideosRequestStatement.executeQuery()) {
-        ImmutableList.Builder<Video> videoBuilder = videoBuilderById.get(resultSet.getLong("postId"));
-        videoBuilder.add(new Video(resultSet.getInt("width"), resultSet.getString("embedCode")));
+        while (resultSet.next()) {
+          ImmutableList.Builder<Video> videoBuilder = videoBuilderById.get(resultSet
+                  .getLong("postId"));
+          videoBuilder.add(new Video(resultSet.getInt("width"), resultSet.getString("embedCode")));
+        }
       }
     }
-    
+
     for (long id : builderById.keySet()) {
       builderById.get(id).setPlayers(videoBuilderById.get(id).build());
     }
@@ -993,9 +1054,59 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     }
     textPostInsertStatement.executeBatch();
   }
-  
+
   private void doPutVideoPostData(Map<Long, VideoPost> postById) throws SQLException {
-    // TODO(bpitman)
+    if (postById.isEmpty()) {
+      return;
+    }
+
+    // Put basic video post data.
+    for (VideoPost post : postById.values()) {
+      videoPostInsertStatement.setLong(1, post.getId());
+      videoPostInsertStatement.setString(2, post.getCaption());
+      videoPostInsertStatement.addBatch();
+    }
+    videoPostInsertStatement.executeBatch();
+
+    // Put videos.
+    int totalVideos = 0;
+    Map<Long, List<Integer>> videoIdsByPostId = new HashMap<>();
+    for (VideoPost post : postById.values()) {
+      List<Integer> videoIds = new ArrayList<>();
+
+      for (Video video : post.getPlayers()) {
+        totalVideos++;
+        videoInsertStatement.setString(1, video.getEmbedCode());
+        videoInsertStatement.setInt(2, video.getWidth());
+        videoInsertStatement.execute();
+
+        try (ResultSet resultSet = videoInsertStatement.getGeneratedKeys()) {
+          int id = resultSet.getInt(1);
+          videoIds.add(id);
+        }
+      }
+
+      videoIdsByPostId.put(post.getId(), videoIds);
+    }
+
+    // Put videoPostVideos.
+    if (totalVideos == 0) {
+      return;
+    }
+
+    for (Map.Entry<Long, List<Integer>> entry : videoIdsByPostId.entrySet()) {
+      long postId = entry.getKey();
+      List<Integer> videoIds = entry.getValue();
+
+      int index = 0;
+      for (int videoId : videoIds) {
+        videoPostVideoInsertStatement.setLong(1, postId);
+        videoPostVideoInsertStatement.setInt(2, videoId);
+        videoPostVideoInsertStatement.setInt(3, index++);
+        videoPostVideoInsertStatement.addBatch();
+      }
+    }
+    videoPostVideoInsertStatement.executeBatch();
   }
 
   @Override

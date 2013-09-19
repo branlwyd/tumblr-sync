@@ -19,6 +19,8 @@ import cc.bran.tumblr.types.LinkPost;
 import cc.bran.tumblr.types.Post;
 import cc.bran.tumblr.types.QuotePost;
 import cc.bran.tumblr.types.TextPost;
+import cc.bran.tumblr.types.VideoPost;
+import cc.bran.tumblr.types.VideoPost.Video;
 
 import com.google.common.collect.ImmutableList;
 
@@ -87,6 +89,17 @@ public class SqlitePostDbTest extends TestCase {
           "http://foo.tumblr.com/posts/513/whee", Instant.now().minus(Duration.millis(6000)),
           Instant.now().minus(Duration.millis(2100)), ImmutableList.of("tag2", "tag4"),
           "edited test post", "the old content was bad");
+
+  private static final Post VIDEO_POST_1 = new VideoPost(9985, "foo.tumblr.com",
+          "http://foo.tumblr.com/9985/whee", Instant.now().minus(Duration.millis(101)),
+          Instant.now(), ImmutableList.of("tag1", "tag5"), "caption", ImmutableList.of(new Video(
+                  200, "embed200"), new Video(400, "embed400")));
+
+  private static final Post VIDEO_POST_1_EDITED = new VideoPost(9985, "foo.tumblr.com",
+          "http://foo.tumblr.com/9985/whee", Instant.now().minus(Duration.millis(101)),
+          Instant.now(), ImmutableList.of("tag1", "tag5"), "new caption", ImmutableList.of(
+                  new Video(200, "embed200"), new Video(400, "embed400"),
+                  new Video(600, "embed600")));
 
   static {
     try {
@@ -170,6 +183,10 @@ public class SqlitePostDbTest extends TestCase {
     assertCanDelete(TEXT_POST_1);
   }
 
+  public void testDelete_videoPost() throws SQLException {
+    assertCanDelete(VIDEO_POST_1);
+  }
+
   public void testEdit_answerPost() throws SQLException {
     assertCanEdit(ANSWER_POST_1, ANSWER_POST_1_EDITED);
   }
@@ -192,6 +209,10 @@ public class SqlitePostDbTest extends TestCase {
 
   public void testEdit_textPost() throws SQLException {
     assertCanEdit(TEXT_POST_1, TEXT_POST_1_EDITED);
+  }
+
+  public void testEdit_videoPost() throws SQLException {
+    assertCanEdit(VIDEO_POST_1, VIDEO_POST_1_EDITED);
   }
 
   public void testGet_answerPost() throws SQLException {
@@ -222,6 +243,10 @@ public class SqlitePostDbTest extends TestCase {
     assertCanGet(TEXT_POST_1);
   }
 
+  public void testGet_videoPost() throws SQLException {
+    assertCanGet(VIDEO_POST_1);
+  }
+
   public void testPut_answerPost() throws SQLException {
     assertCanPut(ANSWER_POST_1);
   }
@@ -244,6 +269,10 @@ public class SqlitePostDbTest extends TestCase {
 
   public void testPut_textPost() throws SQLException {
     assertCanPut(TEXT_POST_1);
+  }
+
+  public void testPut_videoPost() throws SQLException {
+    assertCanPut(VIDEO_POST_1);
   }
 
   public static Test suite() {
