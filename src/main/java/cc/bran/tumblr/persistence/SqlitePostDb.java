@@ -15,13 +15,14 @@ import java.util.Map;
 
 import org.joda.time.Instant;
 
-import sun.reflect.generics.reflectiveObjects.NotImplementedException;
 import cc.bran.tumblr.types.AnswerPost;
 import cc.bran.tumblr.types.AudioPost;
 import cc.bran.tumblr.types.ChatPost;
 import cc.bran.tumblr.types.ChatPost.Dialogue;
 import cc.bran.tumblr.types.LinkPost;
 import cc.bran.tumblr.types.PhotoPost;
+import cc.bran.tumblr.types.PhotoPost.Photo;
+import cc.bran.tumblr.types.PhotoPost.Photo.PhotoSize;
 import cc.bran.tumblr.types.Post;
 import cc.bran.tumblr.types.PostType;
 import cc.bran.tumblr.types.QuotePost;
@@ -116,6 +117,16 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
 
   private static final String DELETE_LINK_POSTS_SQL_TEMPLATE = "DELETE FROM linkPosts WHERE id IN (%s);";
 
+  private static final String DELETE_PHOTO_PHOTO_SIZES_SQL_TEMPLATE = "DELETE FROM photoPhotoSizes WHERE photoId IN (SELECT photoId FROM photoPostPhotos WHERE postId IN (%s));";
+
+  private static final String DELETE_PHOTO_POST_PHOTOS_SQL_TEMPLATE = "DELETE FROM photoPostPhotos WHERE postId IN (%s);";
+
+  private static final String DELETE_PHOTO_POSTS_SQL_TEMPLATE = "DELETE FROM photoPosts WHERE id IN (%s);";
+
+  private static final String DELETE_PHOTO_SIZES_SQL_TEMPLATE = "DELETE FROM photoSizes WHERE id IN (SELECT photoSizeId FROM photoPhotoSizes WHERE photoId IN (SELECT photoId FROM photoPostPhotos WHERE postId IN (%s)))";
+
+  private static final String DELETE_PHOTOS_SQL_TEMPLATE = "DELETE FROM photos WHERE id IN (SELECT photoId FROM photoPostPhotos WHERE postId IN (%s));";
+
   private static final String DELETE_POST_TAGS_SQL_TEMPLATE = "DELETE FROM postTags WHERE postId IN (%s);";
 
   private static final String DELETE_POSTS_SQL_TEMPLATE = "DELETE FROM posts WHERE id IN (%s);";
@@ -134,7 +145,23 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
 
   private static final String LINK_POST_INSERT_SQL = "INSERT INTO linkPosts (id, description, title, url) VALUES (?, ?, ?, ?);";
 
-  private static final String LINK_POSTS_REQUEST_SQL_TEMPLATE = "SELECT id, description, title, url FROM linkPosts WHERE id IN (%s)";
+  private static final String LINK_POSTS_REQUEST_SQL_TEMPLATE = "SELECT id, description, title, url FROM linkPosts WHERE id IN (%s);";
+
+  private static final String PHOTO_INSERT_SQL = "INSERT INTO photos (caption) VALUES (?);";
+
+  private static final String PHOTO_PHOTO_SIZE_INSERT_SQL = "INSERT INTO photoPhotoSizes (photoId, photoSizeId, photoSizeIndex) VALUES (?, ?, ?);";
+
+  private static final String PHOTO_POST_INSERT_SQL = "INSERT INTO photoPosts (id, caption, height, width) VALUES (?, ?, ?, ?);";
+
+  private static final String PHOTO_POST_PHOTO_INSERT_SQL = "INSERT INTO photoPostPhotos (postId, photoId, photoIndex) VALUES (?, ?, ?);";
+
+  private static final String PHOTO_POSTS_REQUEST_SQL_TEMPLATE = "SELECT id, caption, height, width FROM photoPosts WHERE id IN (%s);";
+
+  private static final String PHOTO_SIZE_INSERT_SQL = "INSERT INTO photoSizes (height, url, width) VALUES (?, ?, ?);";
+
+  private static final String PHOTO_SIZES_REQUEST_SQL_TEMPLATE = "SELECT photoPostPhotos.photoId, photoSizes.height, photoSizes.url, photoSizes.width FROM photoPostPhotos JOIN photos ON photos.id = photoPostPhotos.photoId JOIN photoPhotoSizes ON photoPhotoSizes.photoId = photos.id JOIN photoSizes ON photoSizes.id = photoPhotoSizes.photoSizeId WHERE photoPostPhotos.postId IN (%s) ORDER BY photoPhotoSizes.photoSizeIndex;";
+
+  private static final String PHOTOS_REQUEST_SQL_TEMPLATE = "SELECT photoPostPhotos.postId, photoPostPhotos.photoId, photos.caption FROM photoPostPhotos JOIN photos ON photos.id = photoPostPhotos.photoId WHERE photoPostPhotos.postId IN (%s) ORDER BY photoPostPhotos.photoIndex;";
 
   private static final String POST_INSERT_SQL = "INSERT INTO posts (id, blogName, postUrl, postedTimestamp, retrievedTimestamp, postTypeId) SELECT ?, ?, ?, ?, ?, id FROM postTypes WHERE type = ?;";
 
@@ -188,6 +215,16 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
 
   private final PreparedStatement linkPostInsertStatement;
 
+  private final PreparedStatement photoInsertStatement;
+
+  private final PreparedStatement photoPhotoSizeInsertStatement;
+
+  private final PreparedStatement photoPostInsertStatement;
+
+  private final PreparedStatement photoPostPhotoInsertStatement;
+
+  private final PreparedStatement photoSizeInsertStatement;
+
   private final PreparedStatement postInsertStatement;
 
   private final PreparedStatement postRequestStatement;
@@ -217,6 +254,11 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     chatPostDialogueInsertStatement = connection.prepareStatement(CHAT_POST_DIALOGUE_INSERT_SQL);
     dialogueInsertStatement = connection.prepareStatement(DIALOGUE_INSERT_SQL);
     linkPostInsertStatement = connection.prepareStatement(LINK_POST_INSERT_SQL);
+    photoInsertStatement = connection.prepareStatement(PHOTO_INSERT_SQL);
+    photoPhotoSizeInsertStatement = connection.prepareStatement(PHOTO_PHOTO_SIZE_INSERT_SQL);
+    photoPostInsertStatement = connection.prepareStatement(PHOTO_POST_INSERT_SQL);
+    photoPostPhotoInsertStatement = connection.prepareStatement(PHOTO_POST_PHOTO_INSERT_SQL);
+    photoSizeInsertStatement = connection.prepareStatement(PHOTO_SIZE_INSERT_SQL);
     postRequestStatement = connection.prepareStatement(POST_REQUEST_SQL);
     postInsertStatement = connection.prepareStatement(POST_INSERT_SQL);
     postTagInsertStatement = connection.prepareStatement(POST_TAG_INSERT_SQL);
@@ -240,6 +282,11 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     chatPostDialogueInsertStatement.close();
     dialogueInsertStatement.close();
     linkPostInsertStatement.close();
+    photoInsertStatement.close();
+    photoPhotoSizeInsertStatement.close();
+    photoPostInsertStatement.close();
+    photoPostPhotoInsertStatement.close();
+    photoSizeInsertStatement.close();
     postRequestStatement.close();
     postInsertStatement.close();
     postTagInsertStatement.close();
@@ -265,150 +312,42 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
 
   private void doDelete(Collection<Long> ids) throws SQLException {
     // Delete answer post-related data.
-    String deleteAnswerPostsSql = String.format(DELETE_ANSWER_POSTS_SQL_TEMPLATE,
-            buildInQuery(ids.size()));
-    try (PreparedStatement deleteAnswerPostsStatement = connection
-            .prepareStatement(deleteAnswerPostsSql)) {
-      int index = 1;
-      for (long id : ids) {
-        deleteAnswerPostsStatement.setLong(index++, id);
-      }
-      deleteAnswerPostsStatement.execute();
-    }
+    runDeleteQuery(ids, DELETE_ANSWER_POSTS_SQL_TEMPLATE);
 
     // Delete audio post-related data.
-    String deleteAudioPostsSql = String.format(DELETE_AUDIO_POSTS_SQL_TEMPLATE,
-            buildInQuery(ids.size()));
-    try (PreparedStatement deleteAudioPostsStatement = connection
-            .prepareStatement(deleteAudioPostsSql)) {
-      int index = 1;
-      for (long id : ids) {
-        deleteAudioPostsStatement.setLong(index++, id);
-      }
-      deleteAudioPostsStatement.execute();
-    }
+    runDeleteQuery(ids, DELETE_AUDIO_POSTS_SQL_TEMPLATE);
 
     // Delete chat post-related data.
-    String deleteDialogueSql = String
-            .format(DELETE_DIALOGUE_SQL_TEMPLATE, buildInQuery(ids.size()));
-    try (PreparedStatement deleteDialogueStatement = connection.prepareStatement(deleteDialogueSql)) {
-      int index = 1;
-      for (long id : ids) {
-        deleteDialogueStatement.setLong(index++, id);
-      }
-      deleteDialogueStatement.execute();
-    }
-
-    String deletechatPostDialogueSql = String.format(DELETE_CHAT_POST_DIALOGUE_SQL_TEMPLATE,
-            buildInQuery(ids.size()));
-    try (PreparedStatement deletechatPostDialogueStatement = connection
-            .prepareStatement(deletechatPostDialogueSql)) {
-      int index = 1;
-      for (long id : ids) {
-        deletechatPostDialogueStatement.setLong(index++, id);
-      }
-      deletechatPostDialogueStatement.execute();
-    }
-
-    String deleteChatPostsSql = String.format(DELETE_CHAT_POSTS_SQL_TEMPLATE,
-            buildInQuery(ids.size()));
-    try (PreparedStatement deleteChatPostsStatement = connection
-            .prepareStatement(deleteChatPostsSql)) {
-      int index = 1;
-      for (long id : ids) {
-        deleteChatPostsStatement.setLong(index++, id);
-      }
-      deleteChatPostsStatement.execute();
-    }
+    runDeleteQuery(ids, DELETE_DIALOGUE_SQL_TEMPLATE);
+    runDeleteQuery(ids, DELETE_CHAT_POST_DIALOGUE_SQL_TEMPLATE);
+    runDeleteQuery(ids, DELETE_CHAT_POSTS_SQL_TEMPLATE);
 
     // Delete link post-related data.
-    String deleteLinkPostsSql = String.format(DELETE_LINK_POSTS_SQL_TEMPLATE,
-            buildInQuery(ids.size()));
-    try (PreparedStatement deleteLinkPostsStatement = connection
-            .prepareStatement(deleteLinkPostsSql)) {
-      int index = 1;
-      for (long id : ids) {
-        deleteLinkPostsStatement.setLong(index++, id);
-      }
-      deleteLinkPostsStatement.execute();
-    }
+    runDeleteQuery(ids, DELETE_LINK_POSTS_SQL_TEMPLATE);
+
+    // Delete photo post-related data.
+    runDeleteQuery(ids, DELETE_PHOTO_SIZES_SQL_TEMPLATE);
+    runDeleteQuery(ids, DELETE_PHOTO_PHOTO_SIZES_SQL_TEMPLATE);
+    runDeleteQuery(ids, DELETE_PHOTOS_SQL_TEMPLATE);
+    runDeleteQuery(ids, DELETE_PHOTO_POST_PHOTOS_SQL_TEMPLATE);
+    runDeleteQuery(ids, DELETE_PHOTO_POSTS_SQL_TEMPLATE);
 
     // Delete quote post-related data.
-    String deleteQuotePostsSql = String.format(DELETE_QUOTE_POSTS_SQL_TEMPLATE,
-            buildInQuery(ids.size()));
-    try (PreparedStatement deleteQuotePostsStatement = connection
-            .prepareStatement(deleteQuotePostsSql)) {
-      int index = 1;
-      for (long id : ids) {
-        deleteQuotePostsStatement.setLong(index++, id);
-      }
-      deleteQuotePostsStatement.execute();
-    }
+    runDeleteQuery(ids, DELETE_QUOTE_POSTS_SQL_TEMPLATE);
 
     // Delete text post-related data.
-    String deleteTextPostsSql = String.format(DELETE_TEXT_POSTS_SQL_TEMPLATE,
-            buildInQuery(ids.size()));
-    try (PreparedStatement deleteTextPostsStatement = connection
-            .prepareStatement(deleteTextPostsSql)) {
-      int index = 1;
-      for (long id : ids) {
-        deleteTextPostsStatement.setLong(index++, id);
-      }
-      deleteTextPostsStatement.execute();
-    }
+    runDeleteQuery(ids, DELETE_TEXT_POSTS_SQL_TEMPLATE);
 
     // Delete video post-related data.
-    String deleteVideosSql = String.format(DELETE_VIDEOS_SQL_TEMPLATE, buildInQuery(ids.size()));
-    try (PreparedStatement deleteVideosStatement = connection.prepareStatement(deleteVideosSql)) {
-      int index = 1;
-      for (long id : ids) {
-        deleteVideosStatement.setLong(index++, id);
-      }
-      deleteVideosStatement.execute();
-    }
-
-    String deleteVideoPostVideosSql = String.format(DELETE_VIDEO_POST_VIDEOS_SQL_TEMPLATE,
-            buildInQuery(ids.size()));
-    try (PreparedStatement deleteVideoPostVideosStatement = connection
-            .prepareStatement(deleteVideoPostVideosSql)) {
-      int index = 1;
-      for (long id : ids) {
-        deleteVideoPostVideosStatement.setLong(index++, id);
-      }
-      deleteVideoPostVideosStatement.execute();
-    }
-
-    String deleteVideoPostsSql = String.format(DELETE_VIDEO_POSTS_SQL_TEMPLATE,
-            buildInQuery(ids.size()));
-    try (PreparedStatement deleteVideoPostsStatement = connection
-            .prepareStatement(deleteVideoPostsSql)) {
-      int index = 1;
-      for (long id : ids) {
-        deleteVideoPostsStatement.setLong(index++, id);
-      }
-      deleteVideoPostsStatement.execute();
-    }
+    runDeleteQuery(ids, DELETE_VIDEOS_SQL_TEMPLATE);
+    runDeleteQuery(ids, DELETE_VIDEO_POST_VIDEOS_SQL_TEMPLATE);
+    runDeleteQuery(ids, DELETE_VIDEO_POSTS_SQL_TEMPLATE);
 
     // Delete tag-related data.
-    String deletePostTagsSql = String.format(DELETE_POST_TAGS_SQL_TEMPLATE,
-            buildInQuery(ids.size()));
-    try (PreparedStatement deletePostTagsStatement = connection.prepareStatement(deletePostTagsSql)) {
-      int index = 1;
-      for (long id : ids) {
-        deletePostTagsStatement.setLong(index++, id);
-      }
-      deletePostTagsStatement.execute();
-    }
+    runDeleteQuery(ids, DELETE_POST_TAGS_SQL_TEMPLATE);
 
     // Delete post-related data.
-    String deletePostsSql = String.format(DELETE_POSTS_SQL_TEMPLATE, buildInQuery(ids.size()));
-    try (PreparedStatement deletePostsStatement = connection.prepareStatement(deletePostsSql)) {
-      int index = 1;
-      for (long id : ids) {
-        deletePostsStatement.setLong(index++, id);
-      }
-      deletePostsStatement.execute();
-    }
+    runDeleteQuery(ids, DELETE_POSTS_SQL_TEMPLATE);
   }
 
   private Post doGet(long id) throws SQLException {
@@ -544,6 +483,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     Map<Long, AudioPost.Builder> audioBuilderById = new HashMap<>();
     Map<Long, ChatPost.Builder> chatBuilderById = new HashMap<>();
     Map<Long, LinkPost.Builder> linkBuilderById = new HashMap<>();
+    Map<Long, PhotoPost.Builder> photoBuilderById = new HashMap<>();
     Map<Long, QuotePost.Builder> quoteBuilderById = new HashMap<>();
     Map<Long, TextPost.Builder> textBuilderById = new HashMap<>();
     Map<Long, VideoPost.Builder> videoBuilderById = new HashMap<>();
@@ -573,7 +513,8 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
         break;
       case PHOTO:
         postBuilder = new PhotoPost.Builder();
-        throw new NotImplementedException();
+        photoBuilderById.put(id, (PhotoPost.Builder) postBuilder);
+        break;
       case QUOTE:
         postBuilder = new QuotePost.Builder();
         quoteBuilderById.put(id, (QuotePost.Builder) postBuilder);
@@ -607,6 +548,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     doGetAudioPostData(audioBuilderById);
     doGetChatPostData(chatBuilderById);
     doGetLinkPostData(linkBuilderById);
+    doGetPhotoPostData(photoBuilderById);
     doGetQuotePostData(quoteBuilderById);
     doGetTextPostData(textBuilderById);
     doGetVideoPostData(videoBuilderById);
@@ -639,6 +581,92 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
           postBuilder.setDescription(resultSet.getString("description"));
           postBuilder.setTitle(resultSet.getString("title"));
           postBuilder.setUrl(resultSet.getString("url"));
+        }
+      }
+    }
+  }
+
+  private void doGetPhotoPostData(Map<Long, PhotoPost.Builder> builderById) throws SQLException {
+    if (builderById.isEmpty()) {
+      return;
+    }
+
+    // Get photo sizes data.
+    Map<Integer, ImmutableList.Builder<PhotoSize>> photoSizesByPhotoId = new HashMap<>();
+    String photoSizesRequestSql = String.format(PHOTO_SIZES_REQUEST_SQL_TEMPLATE,
+            buildInQuery(builderById.size()));
+    try (PreparedStatement photoSizesRequestStatement = connection
+            .prepareStatement(photoSizesRequestSql)) {
+      int index = 1;
+      for (long id : builderById.keySet()) {
+        photoSizesRequestStatement.setLong(index++, id);
+      }
+
+      try (ResultSet resultSet = photoSizesRequestStatement.executeQuery()) {
+        while (resultSet.next()) {
+          int photoId = resultSet.getInt("photoId");
+          PhotoSize photoSize = new PhotoSize(resultSet.getInt("width"),
+                  resultSet.getInt("height"), resultSet.getString("url"));
+
+          if (!photoSizesByPhotoId.containsKey(photoId)) {
+            photoSizesByPhotoId.put(photoId, new ImmutableList.Builder<PhotoSize>());
+          }
+
+          photoSizesByPhotoId.get(photoId).add(photoSize);
+        }
+      }
+    }
+
+    // Get photos data.
+    Map<Long, ImmutableList.Builder<Photo>> photosByPostId = new HashMap<>();
+    for (long id : builderById.keySet()) {
+      photosByPostId.put(id, new ImmutableList.Builder<Photo>());
+    }
+
+    String photosRequestSql = String.format(PHOTOS_REQUEST_SQL_TEMPLATE,
+            buildInQuery(builderById.size()));
+    try (PreparedStatement photosRequestStatement = connection.prepareStatement(photosRequestSql)) {
+      int index = 1;
+      for (long id : builderById.keySet()) {
+        photosRequestStatement.setLong(index++, id);
+      }
+
+      try (ResultSet resultSet = photosRequestStatement.executeQuery()) {
+        while (resultSet.next()) {
+          long postId = resultSet.getLong("postId");
+          int photoId = resultSet.getInt("photoId");
+
+          List<PhotoSize> photoSizes;
+          if (photoSizesByPhotoId.containsKey(photoId)) {
+            photoSizes = photoSizesByPhotoId.get(photoId).build();
+          } else {
+            photoSizes = ImmutableList.of();
+          }
+
+          Photo photo = new Photo(resultSet.getString("caption"), photoSizes);
+          photosByPostId.get(postId).add(photo);
+        }
+      }
+    }
+
+    // Get photo post data.
+    String photoPostsRequestSql = String.format(PHOTO_POSTS_REQUEST_SQL_TEMPLATE,
+            buildInQuery(builderById.size()));
+    try (PreparedStatement photoPostsRequestStatement = connection
+            .prepareStatement(photoPostsRequestSql)) {
+      int index = 1;
+      for (long id : builderById.keySet()) {
+        photoPostsRequestStatement.setLong(index++, id);
+      }
+
+      try (ResultSet resultSet = photoPostsRequestStatement.executeQuery()) {
+        while (resultSet.next()) {
+          long postId = resultSet.getLong("id");
+          PhotoPost.Builder builder = builderById.get(postId);
+          builder.setCaption(resultSet.getString("caption"));
+          builder.setHeight(resultSet.getInt("height"));
+          builder.setPhotos(photosByPostId.get(postId).build());
+          builder.setWidth(resultSet.getInt("width"));
         }
       }
     }
@@ -794,6 +822,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     Map<Long, AudioPost> audioPostById = new HashMap<>();
     Map<Long, ChatPost> chatPostById = new HashMap<>();
     Map<Long, LinkPost> linkPostById = new HashMap<>();
+    Map<Long, PhotoPost> photoPostById = new HashMap<>();
     Map<Long, QuotePost> quotePostById = new HashMap<>();
     Map<Long, TextPost> textPostById = new HashMap<>();
     Map<Long, VideoPost> videoPostById = new HashMap<>();
@@ -815,7 +844,8 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
         linkPostById.put(post.getId(), (LinkPost) post);
         break;
       case PHOTO:
-        throw new NotImplementedException();
+        photoPostById.put(post.getId(), (PhotoPost) post);
+        break;
       case QUOTE:
         quotePostById.put(post.getId(), (QuotePost) post);
         break;
@@ -852,6 +882,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     doPutAnswerPostData(answerPostById);
     doPutChatPostData(chatPostById);
     doPutLinkPostData(linkPostById);
+    doPutPhotoPostData(photoPostById);
     doPutQuotePostData(quotePostById);
     doPutTextPostData(textPostById);
     doPutVideoPostData(videoPostById);
@@ -961,6 +992,58 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
       linkPostInsertStatement.addBatch();
     }
     linkPostInsertStatement.executeBatch();
+  }
+
+  private void doPutPhotoPostData(Map<Long, PhotoPost> postById) throws SQLException {
+    if (postById.isEmpty()) {
+      return;
+    }
+
+    for (PhotoPost post : postById.values()) {
+      photoPostInsertStatement.setLong(1, post.getId());
+      photoPostInsertStatement.setString(2, post.getCaption());
+      photoPostInsertStatement.setInt(3, post.getHeight());
+      photoPostInsertStatement.setInt(4, post.getWidth());
+      photoPostInsertStatement.addBatch();
+
+      // Add photos.
+      int photoIndex = 0;
+      for (Photo photo : post.getPhotos()) {
+        int photoId;
+        photoInsertStatement.setString(1, photo.getCaption());
+        photoInsertStatement.execute();
+
+        try (ResultSet resultSet = photoInsertStatement.getGeneratedKeys()) {
+          photoId = resultSet.getInt(1);
+        }
+
+        photoPostPhotoInsertStatement.setLong(1, post.getId());
+        photoPostPhotoInsertStatement.setInt(2, photoId);
+        photoPostPhotoInsertStatement.setInt(3, photoIndex++);
+        photoPostPhotoInsertStatement.addBatch();
+
+        int photoSizeIndex = 0;
+        for (PhotoSize photoSize : photo.getPhotoSizes()) {
+          int photoSizeId;
+          photoSizeInsertStatement.setInt(1, photoSize.getHeight());
+          photoSizeInsertStatement.setString(2, photoSize.getUrl());
+          photoSizeInsertStatement.setInt(3, photoSize.getWidth());
+          photoSizeInsertStatement.execute();
+
+          try (ResultSet resultSet = photoSizeInsertStatement.getGeneratedKeys()) {
+            photoSizeId = resultSet.getInt(1);
+          }
+
+          photoPhotoSizeInsertStatement.setInt(1, photoId);
+          photoPhotoSizeInsertStatement.setInt(2, photoSizeId);
+          photoPhotoSizeInsertStatement.setInt(3, photoSizeIndex++);
+          photoPhotoSizeInsertStatement.addBatch();
+        }
+      }
+    }
+    photoPostInsertStatement.executeBatch();
+    photoPostPhotoInsertStatement.executeBatch();
+    photoPhotoSizeInsertStatement.executeBatch();
   }
 
   private void doPutQuotePostData(Map<Long, QuotePost> postById) throws SQLException {
@@ -1231,6 +1314,17 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
         return null;
       }
     }.execute();
+  }
+
+  private void runDeleteQuery(Collection<Long> ids, String sqlTemplate) throws SQLException {
+    String sql = String.format(sqlTemplate, buildInQuery(ids.size()));
+    try (PreparedStatement statement = connection.prepareStatement(sql)) {
+      int index = 1;
+      for (long id : ids) {
+        statement.setLong(index++, id);
+      }
+      statement.execute();
+    }
   }
 
   private static String buildInQuery(int numItemsInSet) {

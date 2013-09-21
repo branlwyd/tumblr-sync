@@ -141,8 +141,8 @@ public class PhotoPost extends Post {
   private final int width;
 
   public PhotoPost(long id, String blogName, String postUrl, Instant postedInstant,
-          Instant retrievedInstant, Collection<String> tags, Collection<Photo> photos, String caption,
-          int width, int height) {
+          Instant retrievedInstant, Collection<String> tags, Collection<Photo> photos,
+          String caption, int width, int height) {
     super(id, blogName, postUrl, postedInstant, retrievedInstant, tags);
     Preconditions.checkNotNull(photos);
     Preconditions.checkNotNull(caption);
@@ -163,7 +163,7 @@ public class PhotoPost extends Post {
     }
     PhotoPost otherPost = (PhotoPost) other;
     return Objects.equals(this.photos, otherPost.photos)
-            && Objects.equals(this.caption, otherPost.photos)
+            && Objects.equals(this.caption, otherPost.caption)
             && Objects.equals(this.width, otherPost.width)
             && Objects.equals(this.height, otherPost.height);
   }

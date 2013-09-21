@@ -16,6 +16,9 @@ import cc.bran.tumblr.types.AudioPost;
 import cc.bran.tumblr.types.ChatPost;
 import cc.bran.tumblr.types.ChatPost.Dialogue;
 import cc.bran.tumblr.types.LinkPost;
+import cc.bran.tumblr.types.PhotoPost;
+import cc.bran.tumblr.types.PhotoPost.Photo;
+import cc.bran.tumblr.types.PhotoPost.Photo.PhotoSize;
 import cc.bran.tumblr.types.Post;
 import cc.bran.tumblr.types.QuotePost;
 import cc.bran.tumblr.types.TextPost;
@@ -70,6 +73,20 @@ public class SqlitePostDbTest extends TestCase {
   private static final Post LINK_POST_1_EDITED = new LinkPost(4003, "foo.tumblr.com",
           "http://foo.tumblr.com/4003/whee", Instant.now(), Instant.now(), ImmutableList.of("tag5",
                   "tag6"), "new-title", "new-url", "new-description");
+
+  private static final Post PHOTO_POST_1 = new PhotoPost(10003, "foo.tumblr.com",
+          "http://foo.tumblr.com/10003/whee", Instant.now(), Instant.now(), ImmutableList.of(
+                  "tag1", "tag3", "tag5"), ImmutableList.of(
+                  new Photo("caption1", ImmutableList.of(new PhotoSize(800, 600, "hello"),
+                          new PhotoSize(1024, 768, "goodbye"))), new Photo("caption2",
+                          ImmutableList.<PhotoSize> of())), "caption", 800, 600);
+
+  private static final Post PHOTO_POST_1_EDITED = new PhotoPost(10003, "foo.tumblr.com",
+          "http://foo.tumblr.com/10003/whee", Instant.now(), Instant.now(), ImmutableList.of(
+                  "tag1", "tag3", "tag5"), ImmutableList.of(
+                  new Photo("caption1", ImmutableList.of(new PhotoSize(800, 600, "hello"))),
+                  new Photo("caption2", ImmutableList.of(new PhotoSize(800, 600, "goodbye")))),
+          "caption", 800, 600);
 
   private static final Post QUOTE_POST_1 = new QuotePost(3324, "foo.tumblr.com",
           "http://foo.tumblr.com/posts/3324/whee", Instant.now().minus(Duration.millis(332)),
@@ -175,6 +192,10 @@ public class SqlitePostDbTest extends TestCase {
     assertCanDelete(LINK_POST_1);
   }
 
+  public void testDelete_photoPost() throws SQLException {
+    assertCanDelete(PHOTO_POST_1);
+  }
+
   public void testDelete_quotePost() throws SQLException {
     assertCanDelete(QUOTE_POST_1);
   }
@@ -201,6 +222,10 @@ public class SqlitePostDbTest extends TestCase {
 
   public void testEdit_linkPost() throws SQLException {
     assertCanEdit(LINK_POST_1, LINK_POST_1_EDITED);
+  }
+
+  public void testEdit_photoPost() throws SQLException {
+    assertCanEdit(PHOTO_POST_1, PHOTO_POST_1_EDITED);
   }
 
   public void testEdit_quotePost() throws SQLException {
@@ -235,6 +260,10 @@ public class SqlitePostDbTest extends TestCase {
     assertNull(postDb.get(12345));
   }
 
+  public void testGet_photoPost() throws SQLException {
+    assertCanGet(PHOTO_POST_1);
+  }
+
   public void testGet_quotePost() throws SQLException {
     assertCanGet(QUOTE_POST_1);
   }
@@ -261,6 +290,10 @@ public class SqlitePostDbTest extends TestCase {
 
   public void testPut_linkPost() throws SQLException {
     assertCanPut(LINK_POST_1);
+  }
+
+  public void testPut_photoPost() throws SQLException {
+    assertCanPut(PHOTO_POST_1);
   }
 
   public void testPut_quotePost() throws SQLException {
