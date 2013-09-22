@@ -664,9 +664,17 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
           long postId = resultSet.getLong("id");
           PhotoPost.Builder builder = builderById.get(postId);
           builder.setCaption(resultSet.getString("caption"));
-          builder.setHeight(resultSet.getInt("height"));
           builder.setPhotos(photosByPostId.get(postId).build());
-          builder.setWidth(resultSet.getInt("width"));
+          
+          int height = resultSet.getInt("height");
+          if (!resultSet.wasNull()) {
+            builder.setHeight(height);
+          }
+          
+          int width = resultSet.getInt("width");
+          if (!resultSet.wasNull()) {
+            builder.setWidth(width);
+          }
         }
       }
     }
@@ -1002,8 +1010,12 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     for (PhotoPost post : postById.values()) {
       photoPostInsertStatement.setLong(1, post.getId());
       photoPostInsertStatement.setString(2, post.getCaption());
-      photoPostInsertStatement.setInt(3, post.getHeight());
-      photoPostInsertStatement.setInt(4, post.getWidth());
+      if (post.getHeight().isPresent()) {
+        photoPostInsertStatement.setInt(3, post.getHeight().get());
+      }
+      if (post.getWidth().isPresent()) {
+        photoPostInsertStatement.setInt(4, post.getWidth().get());
+      }
       photoPostInsertStatement.addBatch();
 
       // Add photos.
@@ -1219,7 +1231,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
           statement
                   .execute("CREATE TABLE IF NOT EXISTS textPosts(id INTEGER PRIMARY KEY REFERENCES posts(id), title TEXT NOT NULL, body TEXT NOT NULL);");
           statement
-                  .execute("CREATE TABLE IF NOT EXISTS photoPosts(id INTEGER PRIMARY KEY REFERENCES posts(id), caption TEXT NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL);");
+                  .execute("CREATE TABLE IF NOT EXISTS photoPosts(id INTEGER PRIMARY KEY REFERENCES posts(id), caption TEXT NOT NULL, width INTEGER, height INTEGER);");
           statement
                   .execute("CREATE TABLE IF NOT EXISTS quotePosts(id INTEGER PRIMARY KEY REFERENCES posts(id), text TEXT NOT NULL, source TEXT NOT NULL);");
           statement

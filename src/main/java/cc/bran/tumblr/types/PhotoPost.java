@@ -6,6 +6,7 @@ import java.util.Objects;
 
 import org.joda.time.Instant;
 
+import com.google.common.base.Optional;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 
@@ -20,11 +21,11 @@ public class PhotoPost extends Post {
 
     private String caption;
 
-    private int height;
+    private Integer height;
 
     private List<Photo> photos;
 
-    private int width;
+    private Integer width;
 
     @Override
     public PhotoPost build() {
@@ -36,7 +37,7 @@ public class PhotoPost extends Post {
       this.caption = caption;
     }
 
-    public void setHeight(int height) {
+    public void setHeight(Integer height) {
       this.height = height;
     }
 
@@ -44,7 +45,7 @@ public class PhotoPost extends Post {
       this.photos = ImmutableList.copyOf(photos);
     }
 
-    public void setWidth(int width) {
+    public void setWidth(Integer width) {
       this.width = width;
     }
   }
@@ -134,23 +135,23 @@ public class PhotoPost extends Post {
 
   private final String caption;
 
-  private final int height;
+  private final Optional<Integer> height;
 
   private final List<Photo> photos;
 
-  private final int width;
+  private final Optional<Integer> width;
 
   public PhotoPost(long id, String blogName, String postUrl, Instant postedInstant,
           Instant retrievedInstant, Collection<String> tags, Collection<Photo> photos,
-          String caption, int width, int height) {
+          String caption, Integer width, Integer height) {
     super(id, blogName, postUrl, postedInstant, retrievedInstant, tags);
     Preconditions.checkNotNull(photos);
     Preconditions.checkNotNull(caption);
 
     this.photos = ImmutableList.copyOf(photos);
     this.caption = caption;
-    this.width = width;
-    this.height = height;
+    this.width = Optional.fromNullable(width);
+    this.height = Optional.fromNullable(height);
   }
 
   @Override
@@ -172,7 +173,7 @@ public class PhotoPost extends Post {
     return caption;
   }
 
-  public int getHeight() {
+  public Optional<Integer> getHeight() {
     return height;
   }
 
@@ -185,7 +186,7 @@ public class PhotoPost extends Post {
     return PostType.PHOTO;
   }
 
-  public int getWidth() {
+  public Optional<Integer> getWidth() {
     return width;
   }
 
