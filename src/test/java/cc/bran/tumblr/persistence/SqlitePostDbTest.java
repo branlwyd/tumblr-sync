@@ -3,6 +3,9 @@ package cc.bran.tumblr.persistence;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 import junit.framework.Test;
 import junit.framework.TestCase;
@@ -26,6 +29,7 @@ import cc.bran.tumblr.types.VideoPost;
 import cc.bran.tumblr.types.VideoPost.Video;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 
 /**
  * Tests for {@link SqlitePostDb}.
@@ -87,6 +91,8 @@ public class SqlitePostDbTest extends TestCase {
                   new Photo("caption1", ImmutableList.of(new PhotoSize(800, 600, "hello"))),
                   new Photo("caption2", ImmutableList.of(new PhotoSize(800, 600, "goodbye")))),
           "caption", 800, 600);
+
+  private static final int POST_COUNT = 2500;
 
   private static final Post QUOTE_POST_1 = new QuotePost(3324, "foo.tumblr.com",
           "http://foo.tumblr.com/posts/3324/whee", Instant.now().minus(Duration.millis(332)),
@@ -276,6 +282,19 @@ public class SqlitePostDbTest extends TestCase {
     assertCanGet(VIDEO_POST_1);
   }
 
+  public void testGetAll() throws SQLException {
+    Map<Long, Post> posts = buildPostCollection(POST_COUNT);
+    postDb.put(posts.values());
+
+    List<Post> retrievedPosts = postDb.getAll();
+    HashMap<Long, Post> retrievedPostById = new HashMap<>();
+    for (Post post : retrievedPosts) {
+      assertFalse(retrievedPostById.containsKey(post.getId()));
+      retrievedPostById.put(post.getId(), post);
+    }
+    assertEquals(posts, retrievedPostById);
+  }
+
   public void testPut_answerPost() throws SQLException {
     assertCanPut(ANSWER_POST_1);
   }
@@ -306,6 +325,22 @@ public class SqlitePostDbTest extends TestCase {
 
   public void testPut_videoPost() throws SQLException {
     assertCanPut(VIDEO_POST_1);
+  }
+
+  public void testPutCollection() throws SQLException {
+    Map<Long, Post> posts = buildPostCollection(POST_COUNT);
+    postDb.put(posts.values());
+  }
+
+  private static Map<Long, Post> buildPostCollection(int count) {
+    ImmutableMap.Builder<Long, Post> postsBuilder = new ImmutableMap.Builder<>();
+    Instant now = Instant.now();
+    for (long id = 1; id <= count; id++) {
+      Post post = new TextPost(id, "many", "http://many.tumblr.com/" + id + "/", now.minus(id),
+              now, ImmutableList.of("tag1", "tag2", "tag3"), "post " + id, "body " + id);
+      postsBuilder.put(id, post);
+    }
+    return postsBuilder.build();
   }
 
   public static Test suite() {

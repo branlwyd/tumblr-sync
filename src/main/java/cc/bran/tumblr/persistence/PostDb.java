@@ -1,5 +1,8 @@
 package cc.bran.tumblr.persistence;
 
+import java.util.Collection;
+import java.util.List;
+
 import cc.bran.tumblr.types.Post;
 
 /**
@@ -29,6 +32,26 @@ public interface PostDb {
    *           if a database error occurs
    */
   Post get(long id) throws Exception;
+
+  /**
+   * Gets all posts from the database.
+   * 
+   * @return a list of all of the posts in the database
+   * @throws Exception
+   *           if a database error occurs
+   */
+  List<Post> getAll() throws Exception;
+
+  /**
+   * Puts a collection of posts into the database. If there are already posts with the same ID, they
+   * will be overwritten.
+   * 
+   * @param posts
+   *          the posts to put into the database
+   * @throws Exception
+   *           if a database error occurs
+   */
+  void put(Collection<Post> posts) throws Exception;
 
   /**
    * Puts a post into the database. If there is already a post with the same ID, it is overwritten.

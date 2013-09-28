@@ -10,6 +10,7 @@ import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -33,6 +34,7 @@ import cc.bran.tumblr.types.VideoPost.Video;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
 
 /**
  * Persists {@link Post}s using an SQLite backend.
@@ -40,6 +42,105 @@ import com.google.common.collect.ImmutableList;
  * @author Brandon Pitman (brandon.pitman@gmail.com)
  */
 public class SqlitePostDb implements PostDb, AutoCloseable {
+
+  private class ListQuery<T> implements AutoCloseable {
+
+    private int idCount;
+
+    private Iterator<List<T>> iterator;
+
+    private PreparedStatement preparedStatement;
+
+    private ResultSet resultSet;
+
+    private final String sqlTemplate;
+
+    public ListQuery(String sqlTemplate, Collection<T> ids) {
+      this.sqlTemplate = sqlTemplate;
+      this.iterator = Iterables.partition(ids, MAX_IDS_PER_QUERY).iterator();
+      this.resultSet = null;
+      this.preparedStatement = null;
+      this.idCount = -1;
+    }
+
+    @Override
+    public void close() throws SQLException {
+      SQLException exception = null;
+
+      iterator = null;
+
+      if (preparedStatement != null) {
+        try {
+          preparedStatement.close();
+        } catch (SQLException ex) {
+          exception = ex;
+        }
+      }
+
+      if (resultSet != null) {
+        try {
+          resultSet.close();
+        } catch (SQLException ex) {
+          if (exception != null) {
+            ex.addSuppressed(exception);
+          }
+          exception = ex;
+        }
+      }
+
+      if (exception != null) {
+        throw exception;
+      }
+    }
+
+    public ResultSet getResultSet() {
+      if (iterator == null) {
+        throw new IllegalStateException("PostIdQuery is closed");
+      }
+
+      return resultSet;
+    }
+
+    public boolean next() throws SQLException {
+      if (iterator == null) {
+        throw new IllegalStateException("PostIdQuery is closed");
+      }
+
+      // Clean up previous result set.
+      if (resultSet != null) {
+        resultSet.close();
+        resultSet = null;
+      }
+
+      // Check to see if there are any additional results.
+      if (!iterator.hasNext()) {
+        if (preparedStatement != null) {
+          preparedStatement.close();
+          preparedStatement = null;
+        }
+        return false;
+      }
+
+      // Set up the next query & return its result set.
+      List<T> ids = iterator.next();
+      if (idCount != ids.size()) {
+        if (preparedStatement != null) {
+          preparedStatement.close();
+        }
+
+        String sql = String.format(sqlTemplate, buildInQuery(ids.size()));
+        preparedStatement = connection.prepareStatement(sql);
+        idCount = ids.size();
+      }
+
+      int index = 1;
+      for (T id : ids) {
+        preparedStatement.setObject(index++, id);
+      }
+      resultSet = preparedStatement.executeQuery();
+      return true;
+    }
+  }
 
   /**
    * Represents a transaction that can be executed.
@@ -147,6 +248,8 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
 
   private static final String LINK_POSTS_REQUEST_SQL_TEMPLATE = "SELECT id, description, title, url FROM linkPosts WHERE id IN (%s);";
 
+  private static final int MAX_IDS_PER_QUERY = 999;
+
   private static final String PHOTO_INSERT_SQL = "INSERT INTO photos (caption) VALUES (?);";
 
   private static final String PHOTO_PHOTO_SIZE_INSERT_SQL = "INSERT INTO photoPhotoSizes (photoId, photoSizeId, photoSizeIndex) VALUES (?, ?, ?);";
@@ -168,6 +271,8 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
   private static final String POST_REQUEST_SQL = "SELECT posts.id, posts.blogName, posts.postUrl, posts.postedTimestamp, posts.retrievedTimestamp, postTypes.type FROM posts JOIN postTypes ON posts.postTypeId = postTypes.id WHERE posts.id = ?;";
 
   private static final String POST_TAG_INSERT_SQL = "INSERT INTO postTags (postId, tagId, tagIndex) VALUES (?, ?, ?);";
+
+  private static final String POSTS_REQUEST_SQL = "SELECT posts.id, posts.blogName, posts.postUrl, posts.postedTimestamp, posts.retrievedTimestamp, postTypes.type FROM posts JOIN postTypes ON posts.postTypeId = postTypes.id;";
 
   private static final String QUOTE_POST_INSERT_SQL = "INSERT INTO quotePosts (id, source, text) VALUES (?, ?, ?);";
 
@@ -229,6 +334,8 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
 
   private final PreparedStatement postRequestStatement;
 
+  private final PreparedStatement postsRequestStatement;
+
   private final PreparedStatement postTagInsertStatement;
 
   private final PreparedStatement quotePostInsertStatement;
@@ -260,6 +367,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     photoPostPhotoInsertStatement = connection.prepareStatement(PHOTO_POST_PHOTO_INSERT_SQL);
     photoSizeInsertStatement = connection.prepareStatement(PHOTO_SIZE_INSERT_SQL);
     postRequestStatement = connection.prepareStatement(POST_REQUEST_SQL);
+    postsRequestStatement = connection.prepareStatement(POSTS_REQUEST_SQL);
     postInsertStatement = connection.prepareStatement(POST_INSERT_SQL);
     postTagInsertStatement = connection.prepareStatement(POST_TAG_INSERT_SQL);
     quotePostInsertStatement = connection.prepareStatement(QUOTE_POST_INSERT_SQL);
@@ -288,6 +396,7 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     photoPostPhotoInsertStatement.close();
     photoSizeInsertStatement.close();
     postRequestStatement.close();
+    postsRequestStatement.close();
     postInsertStatement.close();
     postTagInsertStatement.close();
     quotePostInsertStatement.close();
@@ -363,21 +472,21 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     }
   }
 
+  private List<Post> doGetAll() throws SQLException {
+    try (ResultSet resultSet = postsRequestStatement.executeQuery()) {
+      return doGetFromResultSet(resultSet);
+    }
+  }
+
   private void doGetAnswerPostData(Map<Long, AnswerPost.Builder> builderById) throws SQLException {
     if (builderById.isEmpty()) {
       return;
     }
 
-    String answerPostsRequestSql = String.format(ANSWER_POSTS_REQUEST_SQL_TEMPLATE,
-            buildInQuery(builderById.size()));
-    try (PreparedStatement answerPostsRequestStatement = connection
-            .prepareStatement(answerPostsRequestSql)) {
-      int index = 1;
-      for (long id : builderById.keySet()) {
-        answerPostsRequestStatement.setLong(index++, id);
-      }
-
-      try (ResultSet resultSet = answerPostsRequestStatement.executeQuery()) {
+    try (ListQuery<Long> answerPostsQuery = new ListQuery<Long>(ANSWER_POSTS_REQUEST_SQL_TEMPLATE,
+            builderById.keySet())) {
+      while (answerPostsQuery.next()) {
+        ResultSet resultSet = answerPostsQuery.getResultSet();
         while (resultSet.next()) {
           AnswerPost.Builder postBuilder = builderById.get(resultSet.getLong("id"));
           postBuilder.setAskingName(resultSet.getString("askingName"));
@@ -394,16 +503,10 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
       return;
     }
 
-    String audioPostsRequestSql = String.format(AUDIO_POSTS_REQUEST_SQL_TEMPLATE,
-            buildInQuery(builderById.size()));
-    try (PreparedStatement audioPostsRequestStatement = connection
-            .prepareStatement(audioPostsRequestSql)) {
-      int index = 1;
-      for (long id : builderById.keySet()) {
-        audioPostsRequestStatement.setLong(index++, id);
-      }
-
-      try (ResultSet resultSet = audioPostsRequestStatement.executeQuery()) {
+    try (ListQuery<Long> audioPostsQuery = new ListQuery<Long>(AUDIO_POSTS_REQUEST_SQL_TEMPLATE,
+            builderById.keySet())) {
+      while (audioPostsQuery.next()) {
+        ResultSet resultSet = audioPostsQuery.getResultSet();
         while (resultSet.next()) {
           AudioPost.Builder postBuilder = builderById.get(resultSet.getLong("id"));
           postBuilder.setAlbum(resultSet.getString("album"));
@@ -426,16 +529,10 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     }
 
     // Get basic chat post data.
-    String chatPostsRequestSql = String.format(CHAT_POSTS_REQUEST_SQL_TEMPLATE,
-            buildInQuery(builderById.size()));
-    try (PreparedStatement chatPostsRequestStatement = connection
-            .prepareStatement(chatPostsRequestSql)) {
-      int index = 1;
-      for (long id : builderById.keySet()) {
-        chatPostsRequestStatement.setLong(index++, id);
-      }
-
-      try (ResultSet resultSet = chatPostsRequestStatement.executeQuery()) {
+    try (ListQuery<Long> chatPostsQuery = new ListQuery<Long>(CHAT_POSTS_REQUEST_SQL_TEMPLATE,
+            builderById.keySet())) {
+      while (chatPostsQuery.next()) {
+        ResultSet resultSet = chatPostsQuery.getResultSet();
         while (resultSet.next()) {
           ChatPost.Builder postBuilder = builderById.get(resultSet.getLong("id"));
           postBuilder.setBody(resultSet.getString("body"));
@@ -450,16 +547,10 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
       dialogueBuilderById.put(id, new ImmutableList.Builder<Dialogue>());
     }
 
-    String chatPostDialogueRequestSql = String.format(CHAT_POST_DIALOGUE_REQUEST_SQL_TEMPLATE,
-            buildInQuery(builderById.size()));
-    try (PreparedStatement chatPostDialogueRequestStatement = connection
-            .prepareStatement(chatPostDialogueRequestSql)) {
-      int index = 1;
-      for (long id : builderById.keySet()) {
-        chatPostDialogueRequestStatement.setLong(index++, id);
-      }
-
-      try (ResultSet resultSet = chatPostDialogueRequestStatement.executeQuery()) {
+    try (ListQuery<Long> chatPostDialogueQuery = new ListQuery<Long>(
+            CHAT_POST_DIALOGUE_REQUEST_SQL_TEMPLATE, builderById.keySet())) {
+      while (chatPostDialogueQuery.next()) {
+        ResultSet resultSet = chatPostDialogueQuery.getResultSet();
         while (resultSet.next()) {
           ImmutableList.Builder<Dialogue> dialogueBuilder = dialogueBuilderById.get(resultSet
                   .getLong("postId"));
@@ -566,16 +657,10 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
       return;
     }
 
-    String linkPostsRequestSql = String.format(LINK_POSTS_REQUEST_SQL_TEMPLATE,
-            buildInQuery(builderById.size()));
-    try (PreparedStatement linkPostsRequestStatement = connection
-            .prepareStatement(linkPostsRequestSql)) {
-      int index = 1;
-      for (long id : builderById.keySet()) {
-        linkPostsRequestStatement.setLong(index++, id);
-      }
-
-      try (ResultSet resultSet = linkPostsRequestStatement.executeQuery()) {
+    try (ListQuery<Long> linkPostsQuery = new ListQuery<Long>(LINK_POSTS_REQUEST_SQL_TEMPLATE,
+            builderById.keySet())) {
+      while (linkPostsQuery.next()) {
+        ResultSet resultSet = linkPostsQuery.getResultSet();
         while (resultSet.next()) {
           LinkPost.Builder postBuilder = builderById.get(resultSet.getLong("id"));
           postBuilder.setDescription(resultSet.getString("description"));
@@ -593,16 +678,11 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
 
     // Get photo sizes data.
     Map<Integer, ImmutableList.Builder<PhotoSize>> photoSizesByPhotoId = new HashMap<>();
-    String photoSizesRequestSql = String.format(PHOTO_SIZES_REQUEST_SQL_TEMPLATE,
-            buildInQuery(builderById.size()));
-    try (PreparedStatement photoSizesRequestStatement = connection
-            .prepareStatement(photoSizesRequestSql)) {
-      int index = 1;
-      for (long id : builderById.keySet()) {
-        photoSizesRequestStatement.setLong(index++, id);
-      }
 
-      try (ResultSet resultSet = photoSizesRequestStatement.executeQuery()) {
+    try (ListQuery<Long> photoSizesQuery = new ListQuery<Long>(PHOTO_SIZES_REQUEST_SQL_TEMPLATE,
+            builderById.keySet())) {
+      while (photoSizesQuery.next()) {
+        ResultSet resultSet = photoSizesQuery.getResultSet();
         while (resultSet.next()) {
           int photoId = resultSet.getInt("photoId");
           PhotoSize photoSize = new PhotoSize(resultSet.getInt("width"),
@@ -623,15 +703,10 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
       photosByPostId.put(id, new ImmutableList.Builder<Photo>());
     }
 
-    String photosRequestSql = String.format(PHOTOS_REQUEST_SQL_TEMPLATE,
-            buildInQuery(builderById.size()));
-    try (PreparedStatement photosRequestStatement = connection.prepareStatement(photosRequestSql)) {
-      int index = 1;
-      for (long id : builderById.keySet()) {
-        photosRequestStatement.setLong(index++, id);
-      }
-
-      try (ResultSet resultSet = photosRequestStatement.executeQuery()) {
+    try (ListQuery<Long> photosQuery = new ListQuery<Long>(PHOTOS_REQUEST_SQL_TEMPLATE,
+            builderById.keySet())) {
+      while (photosQuery.next()) {
+        ResultSet resultSet = photosQuery.getResultSet();
         while (resultSet.next()) {
           long postId = resultSet.getLong("postId");
           int photoId = resultSet.getInt("photoId");
@@ -650,27 +725,21 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     }
 
     // Get photo post data.
-    String photoPostsRequestSql = String.format(PHOTO_POSTS_REQUEST_SQL_TEMPLATE,
-            buildInQuery(builderById.size()));
-    try (PreparedStatement photoPostsRequestStatement = connection
-            .prepareStatement(photoPostsRequestSql)) {
-      int index = 1;
-      for (long id : builderById.keySet()) {
-        photoPostsRequestStatement.setLong(index++, id);
-      }
-
-      try (ResultSet resultSet = photoPostsRequestStatement.executeQuery()) {
+    try (ListQuery<Long> photoPostsQuery = new ListQuery<Long>(PHOTO_POSTS_REQUEST_SQL_TEMPLATE,
+            builderById.keySet())) {
+      while (photoPostsQuery.next()) {
+        ResultSet resultSet = photoPostsQuery.getResultSet();
         while (resultSet.next()) {
           long postId = resultSet.getLong("id");
           PhotoPost.Builder builder = builderById.get(postId);
           builder.setCaption(resultSet.getString("caption"));
           builder.setPhotos(photosByPostId.get(postId).build());
-          
+
           int height = resultSet.getInt("height");
           if (!resultSet.wasNull()) {
             builder.setHeight(height);
           }
-          
+
           int width = resultSet.getInt("width");
           if (!resultSet.wasNull()) {
             builder.setWidth(width);
@@ -685,16 +754,10 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
       return;
     }
 
-    String quotePostsRequestSql = String.format(QUOTE_POSTS_REQUEST_SQL_TEMPLATE,
-            buildInQuery(builderById.size()));
-    try (PreparedStatement quotePostsRequestStatement = connection
-            .prepareStatement(quotePostsRequestSql)) {
-      int index = 1;
-      for (long id : builderById.keySet()) {
-        quotePostsRequestStatement.setLong(index++, id);
-      }
-
-      try (ResultSet resultSet = quotePostsRequestStatement.executeQuery()) {
+    try (ListQuery<Long> quotePostsQuery = new ListQuery<Long>(QUOTE_POSTS_REQUEST_SQL_TEMPLATE,
+            builderById.keySet())) {
+      while (quotePostsQuery.next()) {
+        ResultSet resultSet = quotePostsQuery.getResultSet();
         while (resultSet.next()) {
           QuotePost.Builder builder = builderById.get(resultSet.getLong("id"));
           builder.setSource(resultSet.getString("source"));
@@ -716,15 +779,11 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     }
 
     // Request tags & parse data into structure.
-    String tagRequestSql = String.format(TAGS_REQUEST_SQL_TEMPLATE,
-            buildInQuery(builderById.size()));
-    try (PreparedStatement tagRequestStatement = connection.prepareStatement(tagRequestSql)) {
-      int index = 1;
-      for (long id : builderById.keySet()) {
-        tagRequestStatement.setLong(index++, id);
-      }
+    try (ListQuery<Long> tagsRequestQuery = new ListQuery<Long>(TAGS_REQUEST_SQL_TEMPLATE,
+            builderById.keySet())) {
+      while (tagsRequestQuery.next()) {
+        ResultSet resultSet = tagsRequestQuery.getResultSet();
 
-      try (ResultSet resultSet = tagRequestStatement.executeQuery()) {
         while (resultSet.next()) {
           long id = resultSet.getLong("postId");
           String tag = resultSet.getString("tag");
@@ -748,16 +807,10 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
       return;
     }
 
-    String textPostsRequestSql = String.format(TEXT_POSTS_REQUEST_SQL_TEMPLATE,
-            buildInQuery(builderById.size()));
-    try (PreparedStatement textPostsRequestStatement = connection
-            .prepareStatement(textPostsRequestSql)) {
-      int index = 1;
-      for (long id : builderById.keySet()) {
-        textPostsRequestStatement.setLong(index++, id);
-      }
-
-      try (ResultSet resultSet = textPostsRequestStatement.executeQuery()) {
+    try (ListQuery<Long> textPostsQuery = new ListQuery<Long>(TEXT_POSTS_REQUEST_SQL_TEMPLATE,
+            builderById.keySet())) {
+      while (textPostsQuery.next()) {
+        ResultSet resultSet = textPostsQuery.getResultSet();
         while (resultSet.next()) {
           TextPost.Builder builder = builderById.get(resultSet.getLong("id"));
           builder.setTitle(resultSet.getString("title"));
@@ -773,16 +826,10 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     }
 
     // Get basic video post information.
-    String videoPostsRequestSql = String.format(VIDEO_POSTS_REQUEST_SQL_TEMPLATE,
-            buildInQuery(builderById.size()));
-    try (PreparedStatement videoPostsRequestStatement = connection
-            .prepareStatement(videoPostsRequestSql)) {
-      int index = 1;
-      for (long id : builderById.keySet()) {
-        videoPostsRequestStatement.setLong(index++, id);
-      }
-
-      try (ResultSet resultSet = videoPostsRequestStatement.executeQuery()) {
+    try (ListQuery<Long> videoPostsQuery = new ListQuery<Long>(VIDEO_POSTS_REQUEST_SQL_TEMPLATE,
+            builderById.keySet())) {
+      while (videoPostsQuery.next()) {
+        ResultSet resultSet = videoPostsQuery.getResultSet();
         while (resultSet.next()) {
           VideoPost.Builder postBuilder = builderById.get(resultSet.getLong("id"));
           postBuilder.setCaption(resultSet.getString("caption"));
@@ -796,16 +843,10 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
       videoBuilderById.put(id, new ImmutableList.Builder<Video>());
     }
 
-    String videoPostVideosRequestSql = String.format(VIDEO_POST_VIDEOS_REQUEST_SQL_TEMPLATE,
-            buildInQuery(builderById.size()));
-    try (PreparedStatement videoPostVideosRequestStatement = connection
-            .prepareStatement(videoPostVideosRequestSql)) {
-      int index = 1;
-      for (long id : builderById.keySet()) {
-        videoPostVideosRequestStatement.setLong(index++, id);
-      }
-
-      try (ResultSet resultSet = videoPostVideosRequestStatement.executeQuery()) {
+    try (ListQuery<Long> videoPostVideosQuery = new ListQuery<Long>(
+            VIDEO_POST_VIDEOS_REQUEST_SQL_TEMPLATE, builderById.keySet())) {
+      while (videoPostVideosQuery.next()) {
+        ResultSet resultSet = videoPostVideosQuery.getResultSet();
         while (resultSet.next()) {
           ImmutableList.Builder<Video> videoBuilder = videoBuilderById.get(resultSet
                   .getLong("postId"));
@@ -1089,16 +1130,10 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
       return;
     }
 
-    String tagRequestByNameSql = String.format(TAG_REQUEST_BY_NAME_SQL_TEMPLATE,
-            buildInQuery(idByTag.size()));
-    try (PreparedStatement tagRequestByNameStatement = connection
-            .prepareStatement(tagRequestByNameSql)) {
-      int index = 1;
-      for (String tag : idByTag.keySet()) {
-        tagRequestByNameStatement.setString(index++, tag);
-      }
-
-      try (ResultSet resultSet = tagRequestByNameStatement.executeQuery()) {
+    try (ListQuery<String> tagRequestByNamesQuery = new ListQuery<String>(
+            TAG_REQUEST_BY_NAME_SQL_TEMPLATE, idByTag.keySet())) {
+      while (tagRequestByNamesQuery.next()) {
+        ResultSet resultSet = tagRequestByNamesQuery.getResultSet();
         while (resultSet.next()) {
           int id = resultSet.getInt("id");
           String tag = resultSet.getString("tag");
@@ -1215,6 +1250,17 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
     }.execute();
   }
 
+  @Override
+  public List<Post> getAll() throws SQLException {
+    return new Transaction<List<Post>, SQLException>() {
+
+      @Override
+      List<Post> runTransaction() throws SQLException {
+        return doGetAll();
+      }
+    }.execute();
+  }
+
   private void initConnection() throws SQLException {
     connection.setAutoCommit(false);
 
@@ -1317,6 +1363,18 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
   }
 
   @Override
+  public void put(final Collection<Post> posts) throws SQLException {
+    new Transaction<Void, SQLException>() {
+
+      @Override
+      Void runTransaction() throws SQLException {
+        doPut(posts);
+        return null;
+      }
+    }.execute();
+  }
+
+  @Override
   public void put(final Post post) throws SQLException {
     new Transaction<Void, SQLException>() {
 
@@ -1329,13 +1387,15 @@ public class SqlitePostDb implements PostDb, AutoCloseable {
   }
 
   private void runDeleteQuery(Collection<Long> ids, String sqlTemplate) throws SQLException {
-    String sql = String.format(sqlTemplate, buildInQuery(ids.size()));
-    try (PreparedStatement statement = connection.prepareStatement(sql)) {
-      int index = 1;
-      for (long id : ids) {
-        statement.setLong(index++, id);
+    for (List<Long> partitionedIds : Iterables.partition(ids, MAX_IDS_PER_QUERY)) {
+      String sql = String.format(sqlTemplate, buildInQuery(partitionedIds.size()));
+      try (PreparedStatement statement = connection.prepareStatement(sql)) {
+        int index = 1;
+        for (long id : partitionedIds) {
+          statement.setLong(index++, id);
+        }
+        statement.execute();
       }
-      statement.execute();
     }
   }
 
