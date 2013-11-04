@@ -111,8 +111,14 @@ public class JumblrTumblrApi implements TumblrApi {
           com.tumblr.jumblr.types.AnswerPost post) {
     builder.setAnswer(post.getAnswer());
     builder.setAskingName(post.getAskingName());
-    builder.setAskingUrl(post.getAskingUrl());
     builder.setQuestion(post.getQuestion());
+
+    String askingUrl = post.getAskingUrl();
+    if (askingUrl != null) {
+      builder.setAskingUrl(post.getAskingUrl());
+    } else {
+      builder.setAskingUrl("");
+    }
   }
 
   private static void fromJumblrAudioPost(AudioPost.Builder builder,
