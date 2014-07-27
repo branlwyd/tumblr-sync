@@ -12,4 +12,6 @@ public interface TumblrApi {
   Post getPost(String blogName, long id);
   
   Iterable<Post> getAllPosts(String blogName);
+
+  Iterable<Post> getAllPostsWithTag(String blogName, String tag);
 }

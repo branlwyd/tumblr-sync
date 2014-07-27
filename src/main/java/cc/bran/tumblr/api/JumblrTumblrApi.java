@@ -3,6 +3,7 @@ package cc.bran.tumblr.api;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 
 import org.joda.time.Instant;
 
@@ -33,16 +34,19 @@ import com.tumblr.jumblr.JumblrClient;
  */
 public class JumblrTumblrApi implements TumblrApi {
 
-  private class AllPostsIterator implements Iterator<Post> {
+  private class PostsIterator implements Iterator<Post> {
 
     private final String blogName;
+
+    private final Map<String, ?> options;
 
     private int offset;
 
     private List<Post> queuedPosts;
 
-    public AllPostsIterator(String blogName) {
+    public PostsIterator(String blogName, Map<String, ?> options) {
       this.blogName = blogName;
+      this.options = ImmutableMap.copyOf(options);
       this.queuedPosts = new LinkedList<Post>();
       this.offset = 0;
 
@@ -73,8 +77,13 @@ public class JumblrTumblrApi implements TumblrApi {
 
     private void requestPosts() {
       Instant retrievedInstant = Instant.now();
-      List<com.tumblr.jumblr.types.Post> posts = client.blogPosts(blogName,
-              ImmutableMap.of("offset", offset));
+
+      ImmutableMap.Builder<String, Object> currentOptionsBuilder = ImmutableMap.builder();
+      currentOptionsBuilder.putAll(options);
+      currentOptionsBuilder.put("offset", offset);
+      Map<String, Object> currentOptions = currentOptionsBuilder.build();
+
+      List<com.tumblr.jumblr.types.Post> posts = client.blogPosts(blogName, currentOptions);
       offset += posts.size();
 
       for (com.tumblr.jumblr.types.Post post : posts) {
@@ -97,7 +106,18 @@ public class JumblrTumblrApi implements TumblrApi {
 
       @Override
       public Iterator<Post> iterator() {
-        return new AllPostsIterator(blogName);
+        return new PostsIterator(blogName, ImmutableMap.<String, Object> of());
+      }
+    };
+  }
+
+  @Override
+  public Iterable<Post> getAllPostsWithTag(final String blogName, final String tag) {
+    return new Iterable<Post>() {
+
+      @Override
+      public Iterator<Post> iterator() {
+        return new PostsIterator(blogName, ImmutableMap.of("tag", tag));
       }
     };
   }
